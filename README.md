@@ -10,7 +10,7 @@ Previously named **Rapor**. Repository: [AhmetNA/OpenTeX](https://github.com/Ahm
 - Compile locally and keep the previous successful PDF when compilation fails.
 - Distinguish BibTeX record types, keys, field names, titles, dates and links with semantic syntax colours and font weights.
 - Browse references as readable records, edit literal fields in a form, or switch to raw BibTeX. Unknown fields, comments and directives are preserved; macro expressions remain available in raw mode.
-- Select PDF text to reveal its matching source. Cover fields prefer editable metadata. This uses text/context matching, not SyncTeX; ambiguous text, equations and generated labels may not resolve.
+- Select text in either the source editor or PDF to reveal the matching location on the other side. Editor selections scroll to and highlight the PDF while preserving keyboard focus; cover fields prefer editable metadata/the cover page. This uses text/context matching, not SyncTeX; ambiguous text, equations, generated labels and text absent from the current PDF may not resolve. Long source selections reveal their opening passage.
 - Search filenames and content with Turkish/case normalisation and limited typo tolerance.
 - Organize files into your own named groups, change their order and set optional display names. New files are discovered automatically; section labels come from LaTeX headings or filenames.
 - Hide the file sidebar, resize panes, zoom the PDF and export it.
@@ -95,7 +95,7 @@ The layout is stored in `.opentex/workspace.json` in the selected project, and t
 python3 examples/starter/scripts/build_report.py
 ```
 
-Checks cover system-language selection, both translation catalogs and English fallback, editable project layouts and live file discovery, source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
+Checks cover system-language selection, both translation catalogs and English fallback, editable project layouts and live file discovery, source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks in both directions, selection-loop suppression and editor focus, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
 
 ## Scope and licence
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.7.0
+
+- Select source text to scroll to and highlight its matching PDF passage automatically.
+- Match rendered words and surrounding context, cache the PDF text index, and prefer the cover for cover-field selections.
+- Keep editor keyboard focus and block feedback loops between forward and reverse selection events. Missing/ambiguous matches leave the PDF position unchanged.
+- Added source-to-PDF range checks and native NSTextView/PDFKit integration tests.
+
 ## 1.6.0
 
 - Renamed the app and repository from Rapor to OpenTeX, keeping the existing application identity and project preferences.

@@ -84,6 +84,67 @@ enum PDFSourceNavigation {
         return best.0
     }
 
+    struct PDFPageLocation: Equatable {
+        let pageIndex: Int
+        let range: NSRange
+    }
+
+    struct RevealRequest {
+        let id = UUID()
+        let source: String
+        let range: NSRange
+        let preferredPageIndex: Int?
+    }
+
+    /// Cached per PDF document. Selection ranges always address PDFKit's original page strings.
+    struct PDFIndex {
+        private let pages: [NormalizedText]
+        init(pages: [String]) { self.pages = pages.map { NormalizedText($0, latex: false) } }
+
+        func locate(source text: String, range: NSRange, preferredPageIndex: Int? = nil) -> PDFPageLocation? {
+            guard range.location != NSNotFound, range.location >= 0, range.length > 0,
+                  range.location <= (text as NSString).length, range.length <= (text as NSString).length - range.location else { return nil }
+            let source = NormalizedText(text, latex: true)
+            guard let start = source.ranges.firstIndex(where: { NSIntersectionRange($0, range).length > 0 }),
+                  let last = source.ranges.lastIndex(where: { NSIntersectionRange($0, range).length > 0 }) else { return nil }
+            // A long selection reveals its opening passage, avoiding a query longer than a PDF page.
+            var end = min(last + 1, start + 180)
+            while end > start, end < source.ranges.count, source.ranges[end - 1] == source.ranges[end] { end -= 1 }
+            if end == start {
+                end = start + 1
+                while end < source.ranges.count, source.ranges[end - 1] == source.ranges[end] { end += 1 }
+            }
+            let query = source.text.substring(with: NSRange(location: start, length: end - start))
+            let before = source.text.substring(with: NSRange(location: max(0, start - 120), length: min(120, start)))
+            let after = source.text.substring(with: NSRange(location: end, length: min(120, source.text.length - end)))
+            var candidates: [(PDFPageLocation, Int)] = []
+            for (index, page) in pages.enumerated() {
+                var cursor = 0
+                while cursor < page.text.length {
+                    let hit = page.text.range(of: query, range: NSRange(location: cursor, length: page.text.length - cursor))
+                    guard hit.location != NSNotFound else { break }
+                    cursor = hit.location + 1
+                    let upper = NSMaxRange(hit)
+                    // Do not resolve a selected word to a fragment of a different word.
+                    guard hit.location == 0 || page.ranges[hit.location - 1] != page.ranges[hit.location],
+                          upper == page.ranges.count || page.ranges[upper - 1] != page.ranges[upper] else { continue }
+                    let left = page.text.substring(with: NSRange(location: max(0, hit.location - 120), length: min(120, hit.location)))
+                    let right = page.text.substring(with: NSRange(location: upper, length: min(120, page.text.length - upper)))
+                    let score = commonPrefix(before.reversed(), left.reversed()) + commonPrefix(after, right)
+                    candidates.append((PDFPageLocation(pageIndex: index, range: page.sourceRange(hit)), score))
+                }
+            }
+            if let preferredPageIndex, candidates.contains(where: { $0.0.pageIndex == preferredPageIndex }) {
+                candidates = candidates.filter { $0.0.pageIndex == preferredPageIndex }
+            }
+            candidates.sort { $0.1 > $1.1 }
+            guard let best = candidates.first else { return nil }
+            if candidates.count > 1 && best.1 <= candidates[1].1 { return nil }
+            if query.count < 3 && best.1 < 8 { return nil }
+            return best.0
+        }
+    }
+
     private static func commonPrefix<A: Sequence, B: Sequence>(_ a: A, _ b: B) -> Int where A.Element == Character, B.Element == Character {
         zip(a, b).prefix { $0 == $1 }.count
     }

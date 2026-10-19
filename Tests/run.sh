@@ -12,6 +12,8 @@ swiftc Sources/ReportSearch.swift Tests/SearchTests.swift -o "$rapor_test_dir/se
 "$rapor_test_dir/search-checks"
 swiftc Sources/ReportSearch.swift Sources/PDFSourceNavigation.swift Tests/PDFSourceNavigationTests.swift -o "$rapor_test_dir/pdf-navigation-checks"
 "$rapor_test_dir/pdf-navigation-checks"
+swiftc Sources/ReportSearch.swift Sources/PDFSourceNavigation.swift Tests/SourcePDFNavigationTests.swift -o "$rapor_test_dir/source-pdf-checks"
+"$rapor_test_dir/source-pdf-checks"
 swiftc Sources/Bibliography.swift Tests/BibliographyTests.swift -o "$rapor_test_dir/bibliography-checks"
 "$rapor_test_dir/bibliography-checks" "examples/starter/report/kaynaklar.bib"
 swiftc Sources/Bibliography.swift Sources/WorkspaceLayout.swift Tests/WorkspaceTests.swift -o "$rapor_test_dir/workspace-checks"

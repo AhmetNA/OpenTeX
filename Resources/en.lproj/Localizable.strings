@@ -196,3 +196,7 @@
 "Main report" = "Main report";
 "References and appendices" = "References and appendices";
 "Cover and document" = "Cover and document";
+"Compile the PDF to reveal this selection" = "Compile the PDF to reveal this selection";
+"Selection found in PDF" = "Selection found in PDF";
+"No PDF match · compile the PDF or select a longer passage" = "No PDF match · compile the PDF or select a longer passage";
+"Select text ↔ reveal in source or PDF" = "Select text ↔ reveal in source or PDF";

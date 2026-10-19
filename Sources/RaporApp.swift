@@ -40,6 +40,8 @@ final class ReportStore: ObservableObject {
     @Published var log = ""
     @Published var showLog = false
     @Published var pdfRevision = 0
+    @Published var pdfRevealRequest: PDFSourceNavigation.RevealRequest?
+    @Published var pdfRevealRevision = 0
     @Published var autoCompile = false
     @Published var fontSize: CGFloat = 14
     @Published var sidebarVisible = true
@@ -195,6 +197,7 @@ final class ReportStore: ObservableObject {
     }
 
     func openPDFSelection(_ selection: String, pageText: String, pageRange: NSRange, isCover: Bool = false) {
+        clearPDFReveal()
         let documents = files.filter { !$0.isImage && (isCover || !$0.isProtected) && $0.path != "rapor.tex" }.compactMap { file -> PDFSourceDocument? in
             let content = file == selected ? text : (try? String(contentsOf: root.appendingPathComponent("report/" + file.path), encoding: .utf8))
             return content.map { PDFSourceDocument(path: file.path, text: $0) }
@@ -215,6 +218,28 @@ final class ReportStore: ObservableObject {
         status = L("%@ · line %d", file.title, prefix.components(separatedBy: .newlines).count)
     }
 
+    func revealEditorSelection(_ range: NSRange, source: String, path: String) {
+        guard selected?.path == path, text == source, range.location != NSNotFound, range.length > 0,
+              range.location >= 0, range.location <= (source as NSString).length,
+              range.length <= (source as NSString).length - range.location else { return }
+        guard FileManager.default.fileExists(atPath: pdfURL.path) else {
+            status = L("Compile the PDF to reveal this selection")
+            return
+        }
+        pdfRevealRequest = PDFSourceNavigation.RevealRequest(source: source, range: range,
+            preferredPageIndex: ["metadata.tex", "cover.tex"].contains(path) ? 0 : nil)
+        pdfRevealRevision += 1
+    }
+
+    func didRevealPDF(_ id: UUID, found: Bool) {
+        guard pdfRevealRequest?.id == id else { return }
+        status = found ? L("Selection found in PDF") : L("No PDF match · compile the PDF or select a longer passage")
+    }
+
+    private func clearPDFReveal() {
+        if pdfRevealRequest != nil { pdfRevealRequest = nil; pdfRevealRevision += 1 }
+    }
+
     func nextMatch(backward: Bool = false) {
         let all = searchResults.flatMap { result in result.matches.map { (result, $0) } }
         guard !all.isEmpty else { return }
@@ -230,6 +255,7 @@ final class ReportStore: ObservableObject {
         let url = root.appendingPathComponent("report/" + file.path)
         do {
             let content = file.isImage ? "" : try String(contentsOf: url, encoding: .utf8)
+            clearPDFReveal()
             selected = file
             text = content
             diskText = content
@@ -244,6 +270,7 @@ final class ReportStore: ObservableObject {
 
     func edited(_ value: String) {
         guard selected?.isProtected != true else { return }
+        clearPDFReveal()
         text = value
         dirty = text != diskText
         if searchable { scheduleSearch() }
@@ -295,6 +322,7 @@ final class ReportStore: ObservableObject {
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             let value = try String(contentsOf: url, encoding: .utf8)
+            clearPDFReveal()
             text = value; diskText = value; dirty = false; conflict = false; error = nil
             status = L("Opened disk version")
         } catch { self.error = error.localizedDescription }
@@ -311,7 +339,7 @@ final class ReportStore: ObservableObject {
         if let url = fileURL, selected?.isImage == false,
            let current = try? String(contentsOf: url, encoding: .utf8), current != diskText {
             if dirty { conflict = true; error = L("The file changed elsewhere. Choose a version before saving.") }
-            else { text = current; diskText = current; status = L("External changes loaded"); if searchable { scheduleSearch() } }
+            else { clearPDFReveal(); text = current; diskText = current; status = L("External changes loaded"); if searchable { scheduleSearch() } }
         }
         if searchable && signature() != lastSearchSignature { scheduleSearch() }
         let date = (try? pdfURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -319,6 +347,7 @@ final class ReportStore: ObservableObject {
     }
 
     func refreshPDF() {
+        clearPDFReveal()
         observedPDFDate = (try? pdfURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
         pdfRevision += 1
     }
@@ -404,6 +433,7 @@ final class ReportStore: ObservableObject {
               FileManager.default.fileExists(atPath: url.appendingPathComponent("scripts/build_report.py").path) else {
             error = L("This folder does not contain report/rapor.tex and scripts/build_report.py."); return
         }
+        clearPDFReveal()
         root = url.resolvingSymlinksInPath()
         UserDefaults.standard.set(root.path, forKey: "reportProject")
         selected = nil; text = ""; diskText = ""; dirty = false; conflict = false
@@ -458,14 +488,18 @@ struct CodeEditor: NSViewRepresentable {
     func updateNSView(_ view: NSScrollView, context: Context) {
         guard let editor = view.documentView as? NSTextView else { return }
         context.coordinator.store = store
+        context.coordinator.suppressSelection = true
+        defer { context.coordinator.suppressSelection = false }
         editor.isEditable = store.selected?.isProtected != true
         if context.coordinator.path != store.selected?.path {
+            context.coordinator.resetSelectionTracking()
             context.coordinator.path = store.selected?.path
             editor.string = store.text
             editor.undoManager?.removeAllActions()
             editor.setSelectedRange(NSRange(location: 0, length: 0))
             editor.scrollToBeginningOfDocument(nil)
         } else if editor.string != store.text {
+            context.coordinator.resetSelectionTracking()
             let selection = editor.selectedRange()
             editor.string = store.text
             editor.undoManager?.removeAllActions()
@@ -478,6 +512,11 @@ struct CodeEditor: NSViewRepresentable {
             context.coordinator.reveal(range, in: editor)
         }
     }
+    static func dismantleNSView(_ view: NSScrollView, coordinator: Coordinator) {
+        coordinator.cancelPendingSelection()
+        coordinator.editor?.delegate = nil
+        coordinator.editor = nil
+    }
     @MainActor class Coordinator: NSObject, NSTextViewDelegate {
         var store: ReportStore
         weak var editor: NSTextView?
@@ -486,16 +525,47 @@ struct CodeEditor: NSViewRepresentable {
         var styledSize: CGFloat = 0
         var styledSyntax = ""
         var jumpRevision = -1
+        var suppressSelection = false
+        private var pendingSelection: DispatchWorkItem?
+        private var programmaticRange: NSRange?
         init(_ store: ReportStore) { self.store = store }
         func reveal(_ range: NSRange, in editor: NSTextView) {
+            cancelPendingSelection()
+            programmaticRange = range
+            let wasSuppressed = suppressSelection
+            suppressSelection = true
+            defer { suppressSelection = wasSuppressed }
             editor.setSelectedRange(range)
             editor.scrollRangeToVisible(range)
             editor.showFindIndicator(for: range)
         }
         func textDidChange(_ notification: Notification) {
+            cancelPendingSelection()
             guard let editor else { return }
             store.edited(editor.string)
             highlight(fontSize: store.fontSize)
+        }
+        func cancelPendingSelection() { pendingSelection?.cancel(); pendingSelection = nil }
+        func resetSelectionTracking() { cancelPendingSelection(); programmaticRange = nil }
+        func textViewDidChangeSelection(_ notification: Notification) {
+            cancelPendingSelection()
+            guard !suppressSelection, let editor else { return }
+            if programmaticRange == editor.selectedRange() { return }
+            programmaticRange = nil
+            guard editor.selectedRange().length > 0 else { return }
+            let work = DispatchWorkItem { [weak self] in self?.openSelectionInPDF() }
+            pendingSelection = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
+        }
+        func openSelectionInPDF() {
+            guard !suppressSelection, let editor, let path, editor.string == store.text else { return }
+            guard NSEvent.pressedMouseButtons == 0 else {
+                textViewDidChangeSelection(Notification(name: NSTextView.didChangeSelectionNotification))
+                return
+            }
+            let range = editor.selectedRange()
+            guard range.length > 0, programmaticRange != range else { return }
+            store.revealEditorSelection(range, source: editor.string, path: path)
         }
         func highlight(fontSize: CGFloat) {
             guard let editor, let storage = editor.textStorage else { return }
@@ -529,6 +599,7 @@ final class PreviewPDFView: PDFView {
     var revision = -1
     var zoomEvent = 0
     var sourcePath = ""
+    var revealRevision = -1
 }
 struct PDFPreview: NSViewRepresentable {
     let url: URL
@@ -536,6 +607,9 @@ struct PDFPreview: NSViewRepresentable {
     let zoomEvent: Int
     let zoomDirection: Int
     let onSelection: (String, String, NSRange, Bool) -> Void
+    var revealRequest: PDFSourceNavigation.RevealRequest? = nil
+    var revealRevision = 0
+    var onReveal: ((UUID, Bool) -> Void)? = nil
     func makeCoordinator() -> Coordinator { Coordinator(onSelection) }
     func makeNSView(context: Context) -> PreviewPDFView {
         let view = PreviewPDFView()
@@ -555,13 +629,22 @@ struct PDFPreview: NSViewRepresentable {
             else if zoomDirection < 0 { view.zoomOut(nil) }
             else { view.autoScales = true }
         }
-        guard view.revision != revision || view.sourcePath != url.path else { return }
-        context.coordinator.cancelPendingSelection()
-        let sameSource = view.sourcePath == url.path
-        let page = sameSource ? view.currentPage.flatMap { view.document?.index(for: $0) } : nil
-        view.document = PDFDocument(url: url)
-        view.revision = revision; view.sourcePath = url.path
-        if let page, let doc = view.document, doc.pageCount > 0, let target = doc.page(at: min(page, doc.pageCount - 1)) { view.go(to: target) }
+        if view.revision != revision || view.sourcePath != url.path {
+            context.coordinator.cancelPendingSelection()
+            let sameSource = view.sourcePath == url.path
+            let page = sameSource ? view.currentPage.flatMap { view.document?.index(for: $0) } : nil
+            view.document = PDFDocument(url: url)
+            view.revision = revision; view.sourcePath = url.path
+            if let page, let doc = view.document, doc.pageCount > 0, let target = doc.page(at: min(page, doc.pageCount - 1)) { view.go(to: target) }
+        }
+        if view.revealRevision != revealRevision {
+            view.revealRevision = revealRevision
+            if let request = revealRequest {
+                let found = context.coordinator.reveal(request)
+                let callback = onReveal
+                DispatchQueue.main.async { callback?(request.id, found) }
+            } else { context.coordinator.clearReveal() }
+        }
     }
     static func dismantleNSView(_ view: PreviewPDFView, coordinator: Coordinator) { coordinator.stopObserving() }
 
@@ -569,6 +652,10 @@ struct PDFPreview: NSViewRepresentable {
         var onSelection: (String, String, NSRange, Bool) -> Void
         private weak var view: PreviewPDFView?
         private var pending: DispatchWorkItem?
+        private var suppressSelection = false
+        private var forwardSelection: (page: PDFPage, range: NSRange)?
+        private var indexedDocument: PDFDocument?
+        private var index: PDFSourceNavigation.PDFIndex?
         init(_ onSelection: @escaping (String, String, NSRange, Bool) -> Void) { self.onSelection = onSelection }
         func observe(_ view: PreviewPDFView) {
             stopObserving()
@@ -580,16 +667,53 @@ struct PDFPreview: NSViewRepresentable {
             cancelPendingSelection()
             NotificationCenter.default.removeObserver(self)
             view = nil
+            forwardSelection = nil; indexedDocument = nil; index = nil
         }
         deinit { NotificationCenter.default.removeObserver(self) }
         @objc private func selectionChanged(_ notification: Notification) {
             cancelPendingSelection()
-            guard view?.currentSelection?.string?.isEmpty == false else { return }
+            guard !suppressSelection, !isForwardSelection(), view?.currentSelection?.string?.isEmpty == false else { return }
+            forwardSelection = nil
             let work = DispatchWorkItem { [weak self] in self?.openSelection() }
             pending = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.18, execute: work)
         }
+        private func isForwardSelection() -> Bool {
+            guard let forwardSelection, let selection = view?.currentSelection,
+                  selection.pages.count == 1, selection.pages.first === forwardSelection.page,
+                  selection.numberOfTextRanges(on: forwardSelection.page) == 1 else { return false }
+            return selection.range(at: 0, on: forwardSelection.page) == forwardSelection.range
+        }
+        func clearReveal() {
+            cancelPendingSelection()
+            if isForwardSelection() {
+                suppressSelection = true
+                view?.clearSelection()
+                suppressSelection = false
+            }
+            forwardSelection = nil
+        }
+        @discardableResult func reveal(_ request: PDFSourceNavigation.RevealRequest) -> Bool {
+            cancelPendingSelection()
+            guard let view, let document = view.document else { return false }
+            if indexedDocument !== document {
+                indexedDocument = document
+                index = PDFSourceNavigation.PDFIndex(pages: (0..<document.pageCount).map { document.page(at: $0)?.string ?? "" })
+            }
+            guard let hit = index?.locate(source: request.source, range: request.range, preferredPageIndex: request.preferredPageIndex),
+                  let page = document.page(at: hit.pageIndex), let selection = page.selection(for: hit.range),
+                  selection.numberOfTextRanges(on: page) == 1 else { clearReveal(); return false }
+            forwardSelection = (page, selection.range(at: 0, on: page))
+            suppressSelection = true
+            defer { suppressSelection = false }
+            // PDF navigation keeps the editor's keyboard focus; the marker also blocks delayed PDFKit callbacks.
+            selection.color = .systemYellow
+            view.setCurrentSelection(selection, animate: false)
+            view.go(to: selection)
+            return true
+        }
         func openSelection() {
+            guard !suppressSelection, !isForwardSelection() else { return }
             // PDFKit posts during dragging too. Wait for the completed selection, retaining PDF focus for copying.
             guard NSEvent.pressedMouseButtons == 0 else {
                 selectionChanged(Notification(name: .PDFViewSelectionChanged))
@@ -838,7 +962,7 @@ struct ContentView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L("PDF preview")).font(.headline)
-                    Text(L("Select text → reveal source")).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(L("Select text ↔ reveal in source or PDF")).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button { zoomDirection = -1; zoomEvent += 1 } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom out PDF"))
@@ -848,7 +972,8 @@ struct ContentView: View {
             }.padding(.horizontal, 18).frame(height: 66)
             Divider()
             if FileManager.default.fileExists(atPath: store.pdfURL.path) {
-                PDFPreview(url: store.pdfURL, revision: store.pdfRevision, zoomEvent: zoomEvent, zoomDirection: zoomDirection, onSelection: store.openPDFSelection)
+                PDFPreview(url: store.pdfURL, revision: store.pdfRevision, zoomEvent: zoomEvent, zoomDirection: zoomDirection, onSelection: store.openPDFSelection, revealRequest: store.pdfRevealRequest,
+                           revealRevision: store.pdfRevealRevision, onReveal: store.didRevealPDF)
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "doc.richtext").font(.system(size: 36)).foregroundStyle(.secondary)

@@ -101,6 +101,55 @@ import PDFKit
         textEditor.string = store.text
         CodeEditor.Coordinator(store).reveal(store.jumpRange!, in: textEditor)
         assert(textEditor.selectedRange() == store.jumpRange!)
+        // Real NSTextView selection -> forward request -> native PDFKit reveal; no reverse feedback or focus theft.
+        try FileManager.default.createDirectory(at: store.pdfURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try (bytes as Data).write(to: store.pdfURL)
+        store.refreshPDF()
+        let sourceEditor = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 300))
+        sourceEditor.string = store.text
+        let editorNavigation = CodeEditor.Coordinator(store)
+        editorNavigation.editor = sourceEditor; editorNavigation.path = intro.path
+        sourceEditor.delegate = editorNavigation
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 650, height: 300), styleMask: [.borderless], backing: .buffered, defer: false)
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 650, height: 300))
+        window.contentView = container
+        preview.frame = NSRect(x: 320, y: 0, width: 330, height: 300)
+        container.addSubview(sourceEditor); container.addSubview(preview)
+        assert(window.makeFirstResponder(sourceEditor))
+        sourceEditor.setSelectedRange((store.text as NSString).range(of: "features"))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        let request = store.pdfRevealRequest!
+        let beforeForwardCallbacks = callbacks, beforeForwardJump = store.jumpRevision
+        assert(coordinator.reveal(request))
+        assert(preview.currentSelection!.string!.trimmingCharacters(in: .whitespacesAndNewlines) == "features")
+        assert(preview.currentSelection!.pages.first === page)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
+        assert(callbacks == beforeForwardCallbacks && store.jumpRevision == beforeForwardJump)
+        assert(window.firstResponder === sourceEditor && sourceEditor.selectedRange() == request.range)
+        assert(store.text == pdfSource && !store.dirty)
+        let beforeEditorReveal = store.pdfRevealRevision
+        editorNavigation.reveal((store.text as NSString).range(of: "Artist"), in: sourceEditor)
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        assert(store.pdfRevealRevision == beforeEditorReveal)
+        // A new user selection after a programmatic source jump is delivered normally.
+        sourceEditor.setSelectedRange(NSRange(location: 0, length: 0))
+        sourceEditor.setSelectedRange((store.text as NSString).range(of: "Artist"))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        assert(store.pdfRevealRevision > beforeEditorReveal)
+        let latestRequest = store.pdfRevealRequest!
+        assert(coordinator.reveal(latestRequest))
+        assert(preview.currentSelection!.string!.contains("Artist"))
+        let beforeCancelledSelection = store.pdfRevealRevision
+        sourceEditor.setSelectedRange((store.text as NSString).range(of: "Audio"))
+        editorNavigation.cancelPendingSelection()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        assert(store.pdfRevealRevision == beforeCancelledSelection)
+        sourceEditor.delegate = nil
+        let beforeMissing = callbacks
+        assert(!coordinator.reveal(PDFSourceNavigation.RevealRequest(source: "not in this PDF", range: NSRange(location: 0, length: 15), preferredPageIndex: nil)))
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        assert(callbacks == beforeMissing)
+        print("PASS: native editor-to-PDF selection reveal, keyboard focus, bidirectional loop suppression, re-selection after source jumps and pending-event cancellation.")
         // No match leaves the current file and draft untouched. Observer removal cancels queued navigation.
         store.openPDFSelection("outdated PDF text", pageText: "outdated PDF text", pageRange: NSRange(location: 0, length: 17))
         assert(store.selected == intro && store.text == pdfSource)

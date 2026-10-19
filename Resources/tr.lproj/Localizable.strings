@@ -196,3 +196,7 @@
 "Main report" = "Ana rapor";
 "References and appendices" = "Kaynakça ve ekler";
 "Cover and document" = "Kapak ve belge";
+"Compile the PDF to reveal this selection" = "Bu seçimi bulmak için PDF’i derle";
+"Selection found in PDF" = "Seçim PDF’te bulundu";
+"No PDF match · compile the PDF or select a longer passage" = "PDF’te eşleşme yok · PDF’i derle veya daha uzun bir metin seç";
+"Select text ↔ reveal in source or PDF" = "Metin seç ↔ kaynakta veya PDF’te bul";
