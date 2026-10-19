@@ -6,6 +6,7 @@ A small native macOS workspace for local LaTeX reports: files on the left, sourc
 
 - Edit the original `.tex` and `.bib` files, with syntax highlighting, autosave and undo.
 - Compile locally and keep the previous successful PDF when compilation fails.
+- Distinguish BibTeX record types, keys, field names, titles, dates and links with semantic syntax colours and font weights.
 - Browse references as readable records, edit literal fields in a form, or switch to raw BibTeX. Unknown fields, comments and directives are preserved; macro expressions remain available in raw mode.
 - Select PDF text to reveal its matching source. Cover fields prefer editable metadata. This uses text/context matching, not SyncTeX; ambiguous text, equations and generated labels may not resolve.
 - Search filenames and content with Turkish/case normalisation and limited typo tolerance.
@@ -13,6 +14,8 @@ A small native macOS workspace for local LaTeX reports: files on the left, sourc
 - Detect external source changes and protect conflicting unsaved drafts.
 
 ![Readable bibliography workspace](docs/bibliography.png)
+
+![BibTeX syntax highlighting](docs/bibtex.png)
 
 ## Requirements
 
@@ -41,7 +44,7 @@ Ad-hoc builds may ask for file access again after updates. Builds are not notari
 The app initially opens `examples/starter`. To use your own project, choose **Proje Aç** or launch with:
 
 ```sh
-open -n dist/Rapor.app --args --project /path/to/project
+open -n dist/Rapor.app --args --project /path/to/project --file kaynaklar.bib
 ```
 
 ## Project layout

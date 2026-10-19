@@ -18,4 +18,3 @@ printf 'Rust original must not enter working files\n' > "$rapor_test_dir/referen
 ln -s "$rapor_test_dir/reference" "$rapor_test_dir/project/report/template-original"
 swiftc -D RAPOR_TEST -parse-as-library Sources/*.swift Tests/AppChecks.swift -o "$rapor_test_dir/app-checks" -framework SwiftUI -framework AppKit -framework PDFKit -framework Combine
 "$rapor_test_dir/app-checks" --project "$rapor_test_dir/project"
-

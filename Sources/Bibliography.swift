@@ -4,6 +4,7 @@ struct BibliographyField: Identifiable {
     let name: String
     let value: String
     let range: NSRange
+    let nameRange: NSRange
     let editable: Bool
     let wrapped: Bool
     let quoted: Bool
@@ -73,7 +74,7 @@ struct Bibliography {
                 let numeric = !raw.isEmpty && raw.allSatisfy { $0.isNumber }
                 let range = NSRange(location: valueStart + (wrapped ? 1 : 0), length: max(0, trimmedEnd - valueStart - (wrapped ? 2 : 0)))
                 if fields.contains(where: { $0.name == name }) { valid = false; break }
-                fields.append(BibliographyField(name: name, value: (text as NSString).substring(with: range), range: range, editable: wrapped || numeric, wrapped: wrapped, quoted: wrapped && raw.hasPrefix("\"")))
+                fields.append(BibliographyField(name: name, value: (text as NSString).substring(with: range), range: range, nameRange: NSRange(location: nameStart, length: name.utf16.count), editable: wrapped || numeric, wrapped: wrapped, quoted: wrapped && raw.hasPrefix("\"")))
                 cursor = valueEnd
             }
             if valid { entries.append(BibliographyEntry(type: type, key: key, fields: fields, range: NSRange(location: start, length: end + 1 - start))) }

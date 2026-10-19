@@ -64,7 +64,9 @@ final class ReportStore: ObservableObject {
         let fallback = Bundle.main.object(forInfoDictionaryKey: "DefaultProjectPath") as? String ?? FileManager.default.currentDirectoryPath
         root = URL(fileURLWithPath: requested ?? UserDefaults.standard.string(forKey: "reportProject") ?? fallback).resolvingSymlinksInPath()
         scan()
-        if let first = files.first { select(first) }
+        let requestedFile = args.firstIndex(of: "--file").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
+        if let requestedFile, let file = files.first(where: { $0.path == requestedFile }) { select(file) }
+        else if let first = files.first { select(first) }
         refreshPDF()
         poll = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.checkExternalChanges() }
@@ -444,6 +446,7 @@ struct CodeEditor: NSViewRepresentable {
         var path: String?
         var styledText = ""
         var styledSize: CGFloat = 0
+        var styledSyntax = ""
         var jumpRevision = -1
         init(_ store: ReportStore) { self.store = store }
         func reveal(_ range: NSRange, in editor: NSTextView) {
@@ -458,8 +461,9 @@ struct CodeEditor: NSViewRepresentable {
         }
         func highlight(fontSize: CGFloat) {
             guard let editor, let storage = editor.textStorage else { return }
-            guard styledText != editor.string || styledSize != fontSize else { return }
-            styledText = editor.string; styledSize = fontSize
+            let syntax = store.selected?.path.hasSuffix(".bib") == true ? "bib" : "tex"
+            guard styledText != editor.string || styledSize != fontSize || styledSyntax != syntax else { return }
+            styledText = editor.string; styledSize = fontSize; styledSyntax = syntax
             let range = NSRange(location: 0, length: storage.length)
             let paragraph = NSMutableParagraphStyle()
             paragraph.lineSpacing = 5
@@ -474,6 +478,7 @@ struct CodeEditor: NSViewRepresentable {
                     }
                 }
             }
+            if syntax == "bib" { BibliographySyntax.apply(to: storage, fontSize: fontSize) }
             storage.endEditing()
             editor.typingAttributes = [.foregroundColor: NSColor.labelColor,
                                        .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
@@ -637,7 +642,7 @@ struct ContentView: View {
                 else { Image(systemName: store.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(store.error == nil ? Color.secondary : Color.orange) }
                 Text(store.status).font(.system(size: 12))
                 Spacer()
-                Text("Benim Raporum · Yerel LaTeX").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("Benim Raporum · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Geliştirme")").font(.system(size: 11)).foregroundStyle(.secondary)
                 Button { store.showLog.toggle() } label: { Image(systemName: "terminal") }
                     .buttonStyle(.borderless).help("Derleme günlüğü")
             }.padding(.horizontal, 14).frame(height: 32)
