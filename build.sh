@@ -18,10 +18,11 @@ swiftc -parse-as-library -O -target "${rapor_arch}-apple-macosx14.0" Sources/*.s
 /usr/bin/python3 - <<'PLIST'
 from pathlib import Path
 import plistlib
-info={'CFBundleExecutable':'Rapor','CFBundleIdentifier':'com.ahmetna.rapor','CFBundleIconFile':'AppIcon','CFBundleName':'Rapor','CFBundleDisplayName':'Rapor','CFBundlePackageType':'APPL','CFBundleShortVersionString':'1.4.1','CFBundleVersion':'7','LSMinimumSystemVersion':'14.0','NSHighResolutionCapable':True,'DefaultProjectPath':str(Path.cwd()/'examples/starter'),'NSHumanReadableCopyright':'Copyright 2026 Ahmet Nuri Aydemir. MIT License.'}
+info={'CFBundleExecutable':'Rapor','CFBundleIdentifier':'com.ahmetna.rapor','CFBundleIconFile':'AppIcon','CFBundleName':'Rapor','CFBundleDisplayName':'Rapor','CFBundlePackageType':'APPL','CFBundleShortVersionString':'1.5.0','CFBundleVersion':'8','CFBundleDevelopmentRegion':'en','CFBundleLocalizations':['en','tr'],'LSMinimumSystemVersion':'14.0','NSHighResolutionCapable':True,'DefaultProjectPath':str(Path.cwd()/'examples/starter'),'NSHumanReadableCopyright':'Copyright 2026 Ahmet Nuri Aydemir. MIT License.'}
 Path('dist/Rapor.app/Contents/Info.plist').write_bytes(plistlib.dumps(info))
 PLIST
 cp Assets/AppIcon.icns dist/Rapor.app/Contents/Resources/AppIcon.icns
+cp -R Resources/*.lproj dist/Rapor.app/Contents/Resources/
 codesign --force --sign "$rapor_signing_identity" dist/Rapor.app
 codesign --verify --deep --strict dist/Rapor.app
 printf 'Built: %s/dist/Rapor.app\n' "$PWD"

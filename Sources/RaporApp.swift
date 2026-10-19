@@ -30,7 +30,7 @@ final class ReportStore: ObservableObject {
     @Published var dirty = false
     @Published var conflict = false
     @Published var busy = false
-    @Published var status = "Hazır"
+    @Published var status = L("Ready")
     @Published var error: String?
     @Published var log = ""
     @Published var showLog = false
@@ -56,7 +56,7 @@ final class ReportStore: ObservableObject {
     private var observedPDFDate: Date?
     var pdfURL: URL { root.appendingPathComponent("output/pdf/bitirme-raporu.pdf") }
     var fileURL: URL? { selected.map { root.appendingPathComponent("report/" + $0.path) } }
-    var groups: [String] { ["Rapor metni", "Belge", "Düzen ve ayarlar", "Korunan şablon", "Görseller"] }
+    var groups: [String] { [L("Report text"), L("Document"), L("Structure and settings"), L("Protected template"), L("Images")] }
 
     init() {
         let args = CommandLine.arguments
@@ -76,17 +76,17 @@ final class ReportStore: ObservableObject {
     func scan() {
         let folder = root.appendingPathComponent("report")
         let known: [String: (String, String, String)] = [
-            "sections/01-introduction.tex": ("Giriş", "Amaç, kapsam ve literatür", "Rapor metni"),
-            "sections/02-analysis.tex": ("Analiz ve fizibilite", "Gereksinimler ve yapılabilirlik", "Rapor metni"),
-            "sections/03-design.tex": ("Sistem tasarımı", "Veri, yöntem ve sistem akışı", "Rapor metni"),
-            "sections/04-results.tex": ("Deneysel sonuçlar", "Deneyler ve karşılaştırmalar", "Rapor metni"),
-            "sections/05-discussion.tex": ("Sonuç ve tartışma", "Katkılar, sınırlar ve gelecek işler", "Rapor metni"),
-            "sections/06-appendices.tex": ("Ekler", "Ek belgeler ve bağlantılar", "Rapor metni"),
-            "metadata.tex": ("Kapak bilgileri", "Başlık, öğrenci, danışman ve tarih", "Belge"),
-            "cover.tex": ("Kapak şablonu", "Sabit biçim · salt okunur", "Korunan şablon"),
-            "kaynaklar.bib": ("Kaynakça", "Bilimsel kaynak kayıtları", "Belge"),
-            "rapor.tex": ("Bölüm sırası", "Ana dosya · metni bölümlere yaz", "Düzen ve ayarlar"),
-            "preamble.tex": ("Biçim şablonu", "Sabit yazı tipi ve sayfa düzeni · salt okunur", "Korunan şablon")
+            "sections/01-introduction.tex": (L("Introduction"), L("Purpose, scope and literature"), L("Report text")),
+            "sections/02-analysis.tex": (L("Analysis and feasibility"), L("Requirements and feasibility"), L("Report text")),
+            "sections/03-design.tex": (L("System design"), L("Data, methods and system flow"), L("Report text")),
+            "sections/04-results.tex": (L("Experimental results"), L("Experiments and comparisons"), L("Report text")),
+            "sections/05-discussion.tex": (L("Conclusion and discussion"), L("Contributions, limitations and future work"), L("Report text")),
+            "sections/06-appendices.tex": (L("Appendices"), L("Supporting documents and links"), L("Report text")),
+            "metadata.tex": (L("Cover details"), L("Title, student, supervisor and date"), L("Document")),
+            "cover.tex": (L("Cover template"), L("Fixed format · read-only"), L("Protected template")),
+            "kaynaklar.bib": (L("Bibliography"), L("Reference records"), L("Document")),
+            "rapor.tex": (L("Section order"), L("Main file · write content in section files"), L("Structure and settings")),
+            "preamble.tex": (L("Layout template"), L("Fixed typography and page layout · read-only"), L("Protected template"))
         ]
         var result: [ReportFile] = []
         if let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
@@ -97,7 +97,7 @@ final class ReportStore: ObservableObject {
                 guard ["tex", "bib", "png", "jpg", "jpeg", "webp"].contains(url.pathExtension.lowercased()),
                       (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
                 let details = known[relative]
-                let group = details?.2 ?? (["tex", "bib"].contains(url.pathExtension) ? "Rapor metni" : "Görseller")
+                let group = details?.2 ?? (["tex", "bib"].contains(url.pathExtension) ? L("Report text") : L("Images"))
                 result.append(ReportFile(path: relative, title: details?.0 ?? url.deletingPathExtension().lastPathComponent,
                                          hint: details?.1 ?? relative, group: group))
             }
@@ -106,7 +106,7 @@ final class ReportStore: ObservableObject {
             let ga = groups.firstIndex(of: a.group) ?? 0, gb = groups.firstIndex(of: b.group) ?? 0
             return ga == gb ? a.path < b.path : ga < gb
         }
-        if files.isEmpty { error = "Rapor dosyaları bulunamadı. Proje Aç ile rapor proje klasörünü seç." }
+        if files.isEmpty { error = L("Report files were not found. Use Open Project to select the report project folder.") }
     }
 
     func toggleSidebar() { sidebarVisible.toggle() }
@@ -150,9 +150,9 @@ final class ReportStore: ObservableObject {
 
     func editBibliography(_ entry: BibliographyEntry, original: String, values: [String: String]) -> String? {
         guard selected?.path.hasSuffix(".bib") == true, text == original else {
-            return "Kaynakça bu sırada başka yerde değişti. Formu kapatıp kaynağı yeniden aç; değişikliklerini kaybetmemek için önce kopyalayabilirsin."
+            return L("The bibliography changed elsewhere while this form was open. Copy your changes if needed, then close the form and reopen the reference.")
         }
-        guard !conflict else { return "Kaynakça dosyasında iki farklı sürüm var. Önce dosya çakışmasını çöz." }
+        guard !conflict else { return L("The bibliography has conflicting versions. Resolve the file conflict first.") }
         edited(Bibliography.replacing(entry, in: original, values: values))
         return nil
     }
@@ -164,7 +164,7 @@ final class ReportStore: ObservableObject {
         }
         guard let location = PDFSourceNavigation.locate(selection: selection, pageText: pageText, pageRange: pageRange, documents: documents, preferredPath: isCover ? "metadata.tex" : nil),
               let file = files.first(where: { $0.path == location.path }) else {
-            status = "Kaynakta kesin eşleşme bulunamadı · daha uzun bir metin seç veya PDF’i derle"
+            status = L("No exact source match · select a longer passage or compile the PDF")
             return
         }
         select(file)
@@ -175,7 +175,7 @@ final class ReportStore: ObservableObject {
         jumpRange = location.range
         jumpRevision += 1
         let prefix = (text as NSString).substring(to: location.range.location)
-        status = "\(file.title) · satır \(prefix.components(separatedBy: .newlines).count)"
+        status = L("%@ · line %d", file.title, prefix.components(separatedBy: .newlines).count)
     }
 
     func nextMatch(backward: Bool = false) {
@@ -199,10 +199,10 @@ final class ReportStore: ObservableObject {
             dirty = false
             conflict = false
             error = nil
-            status = "Hazır"
+            status = L("Ready")
             activeMatchID = nil
             jumpRange = nil
-        } catch { self.error = "Dosya açılamadı: \(error.localizedDescription)" }
+        } catch { self.error = L("Could not open file: %@", error.localizedDescription) }
     }
 
     func edited(_ value: String) {
@@ -211,7 +211,7 @@ final class ReportStore: ObservableObject {
         dirty = text != diskText
         if searchable { scheduleSearch() }
         guard dirty else { return }
-        status = "Kaydediliyor…"
+        status = L("Saving…")
         saveWork?.cancel()
         let work = DispatchWorkItem { [weak self] in _ = self?.save() }
         saveWork = work
@@ -223,27 +223,27 @@ final class ReportStore: ObservableObject {
         saveWork?.cancel()
         guard dirty, let url = fileURL, selected?.isImage == false else { return !conflict }
         guard selected?.isProtected != true else {
-            error = "Bu dosya sabit rapor şablonudur; içerik veya kapak bilgileri dosyasını düzenle."
+            error = L("This is a protected report template. Edit a section or the cover details file instead.")
             return false
         }
         do {
             let current = try String(contentsOf: url, encoding: .utf8)
             guard current == diskText || current == text else {
                 conflict = true
-                error = "Bu dosya başka yerde de değişti. Kendi metnini kopyalayabilir veya diskteki sürümü açabilirsin."
-                status = "İki farklı sürüm var"
+                error = L("This file also changed elsewhere. You can copy your draft or open the version on disk.")
+                status = L("Conflicting versions")
                 return false
             }
             try text.write(to: url, atomically: true, encoding: .utf8)
             diskText = text
             dirty = false
             conflict = false
-            status = "Kaydedildi"
+            status = L("Saved")
             if autoCompile { scheduleCompile() }
             return true
         } catch {
-            self.error = "Kaydedilemedi: \(error.localizedDescription)"
-            status = "Kaydetme hatası"
+            self.error = L("Could not save: %@", error.localizedDescription)
+            status = L("Save error")
             return false
         }
     }
@@ -251,29 +251,29 @@ final class ReportStore: ObservableObject {
     func useDiskVersion() {
         guard let url = fileURL else { return }
         let alert = NSAlert()
-        alert.messageText = "Diskteki sürüm açılsın mı?"
-        alert.informativeText = "Düzenleyicideki kaydedilmemiş metin değiştirilecek. Gerekirse önce Kendi Metnimi Kopyala düğmesini kullan."
-        alert.addButton(withTitle: "Diskteki Sürümü Aç")
-        alert.addButton(withTitle: "Vazgeç")
+        alert.messageText = L("Open the version on disk?")
+        alert.informativeText = L("Unsaved text in the editor will be replaced. Use Copy My Draft first if you need to keep it.")
+        alert.addButton(withTitle: L("Open Disk Version"))
+        alert.addButton(withTitle: L("Cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         do {
             let value = try String(contentsOf: url, encoding: .utf8)
             text = value; diskText = value; dirty = false; conflict = false; error = nil
-            status = "Diskteki sürüm açıldı"
+            status = L("Opened disk version")
         } catch { self.error = error.localizedDescription }
     }
 
     func copyDraft() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
-        status = "Metnin panoya kopyalandı"
+        status = L("Draft copied to clipboard")
     }
 
     func checkExternalChanges() {
         if let url = fileURL, selected?.isImage == false,
            let current = try? String(contentsOf: url, encoding: .utf8), current != diskText {
-            if dirty { conflict = true; error = "Dosya başka yerde değişti. Kaydetmeden önce sürümü seç." }
-            else { text = current; diskText = current; status = "Dışarıdaki değişiklik yüklendi"; if searchable { scheduleSearch() } }
+            if dirty { conflict = true; error = L("The file changed elsewhere. Choose a version before saving.") }
+            else { text = current; diskText = current; status = L("External changes loaded"); if searchable { scheduleSearch() } }
         }
         if searchable && signature() != lastSearchSignature { scheduleSearch() }
         let date = (try? pdfURL.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
@@ -309,9 +309,9 @@ final class ReportStore: ObservableObject {
         guard saved else { return }
         let script = root.appendingPathComponent("scripts/build_report.py")
         guard FileManager.default.fileExists(atPath: script.path) else {
-            error = "Derleme komutu bulunamadı. Rapor proje klasörünü aç."; return
+            error = L("Build script not found. Open the report project folder."); return
         }
-        busy = true; status = "PDF derleniyor…"; error = nil; log = ""
+        busy = true; status = L("Compiling PDF…"); error = nil; log = ""
         compileSignature = signature()
         let job = Process()
         job.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
@@ -332,15 +332,15 @@ final class ReportStore: ObservableObject {
                 Task { @MainActor in
                     guard let self else { return }
                     try? self.outputHandle?.close(); self.outputHandle = nil
-                    self.log = (try? String(contentsOf: logURL, encoding: .utf8)) ?? "Derleme günlüğü okunamadı."
+                    self.log = (try? String(contentsOf: logURL, encoding: .utf8)) ?? L("The build log could not be read.")
                     try? FileManager.default.removeItem(at: logURL)
                     self.busy = false; self.process = nil
                     if code == 0 {
                         self.refreshPDF()
-                        self.status = self.signature() == self.compileSignature && !self.dirty ? "PDF güncel" : "PDF hazır · yeni değişiklikler var"
+                        self.status = self.signature() == self.compileSignature && !self.dirty ? L("PDF is up to date") : L("PDF ready · new changes pending")
                     } else {
-                        self.status = "Derleme tamamlanamadı"
-                        self.error = "LaTeX derlenemedi. Ayrıntıları Derleme Günlüğü’nde görebilirsin. Son başarılı PDF korundu."
+                        self.status = L("Build failed")
+                        self.error = L("LaTeX compilation failed. See the Build Log for details. The last successful PDF was kept.")
                         self.showLog = true
                     }
                     if self.autoCompile && (self.dirty || self.signature() != self.compileSignature) { self.scheduleCompile() }
@@ -352,19 +352,19 @@ final class ReportStore: ObservableObject {
             try? outputHandle?.close(); outputHandle = nil
             try? FileManager.default.removeItem(at: logURL)
             busy = false; process = nil
-            self.error = "Derleyici başlatılamadı: \(error.localizedDescription)"
+            self.error = L("Could not start compiler: %@", error.localizedDescription)
         }
     }
 
     func chooseProject() {
         guard !busy, save() else { return }
         let panel = NSOpenPanel()
-        panel.title = "Rapor proje klasörünü seç"
+        panel.title = L("Select a report project folder")
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard FileManager.default.fileExists(atPath: url.appendingPathComponent("report/rapor.tex").path),
               FileManager.default.fileExists(atPath: url.appendingPathComponent("scripts/build_report.py").path) else {
-            error = "Bu klasörde report/rapor.tex ve scripts/build_report.py bulunamadı."; return
+            error = L("This folder does not contain report/rapor.tex and scripts/build_report.py."); return
         }
         root = url.resolvingSymlinksInPath()
         UserDefaults.standard.set(root.path, forKey: "reportProject")
@@ -376,17 +376,17 @@ final class ReportStore: ObservableObject {
     }
 
     func exportPDF() {
-        guard FileManager.default.fileExists(atPath: pdfURL.path) else { error = "Önce PDF Derle düğmesine bas."; return }
+        guard FileManager.default.fileExists(atPath: pdfURL.path) else { error = L("Click Compile PDF first."); return }
         let panel = NSSavePanel()
-        panel.title = "Son derlenen PDF’i kaydet"
-        panel.nameFieldStringValue = "Bitirme-Raporu.pdf"
+        panel.title = L("Save the last compiled PDF")
+        panel.nameFieldStringValue = L("Report.pdf")
         panel.allowedContentTypes = [.pdf]
         guard panel.runModal() == .OK, let target = panel.url else { return }
-        if target.standardizedFileURL == pdfURL.standardizedFileURL { status = "PDF zaten bu konumda"; return }
+        if target.standardizedFileURL == pdfURL.standardizedFileURL { status = L("The PDF is already at this location"); return }
         do {
             try Data(contentsOf: pdfURL).write(to: target, options: .atomic)
-            status = "PDF dışa aktarıldı"
-        } catch { self.error = "PDF kaydedilemedi: \(error.localizedDescription)" }
+            status = L("PDF exported")
+        } catch { self.error = L("Could not save PDF: %@", error.localizedDescription) }
     }
 }
 
@@ -411,7 +411,7 @@ struct CodeEditor: NSViewRepresentable {
         editor.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
         editor.textContainerInset = NSSize(width: 24, height: 22)
         editor.setAccessibilityIdentifier("reportEditor")
-        editor.setAccessibilityLabel("LaTeX metin düzenleyici")
+        editor.setAccessibilityLabel(L("LaTeX source editor"))
         editor.delegate = context.coordinator
         scroll.documentView = editor
         context.coordinator.editor = editor
@@ -504,8 +504,8 @@ struct PDFPreview: NSViewRepresentable {
         view.autoScales = true; view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical; view.displaysPageBreaks = true
         view.backgroundColor = .windowBackgroundColor
-        view.setAccessibilityLabel("Derlenen rapor PDF önizlemesi")
-        view.toolTip = "Bir kelimeyi çift tıkla veya metni seç: kaynak dosyası ilgili konumda açılır."
+        view.setAccessibilityLabel(L("Compiled report PDF preview"))
+        view.toolTip = L("Double-click a word or select text to open its location in the source file.")
         context.coordinator.observe(view)
         return view
     }
@@ -642,33 +642,33 @@ struct ContentView: View {
                 else { Image(systemName: store.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(store.error == nil ? Color.secondary : Color.orange) }
                 Text(store.status).font(.system(size: 12))
                 Spacer()
-                Text("Benim Raporum · \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Geliştirme")").font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(L("My Report · %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development"))).font(.system(size: 11)).foregroundStyle(.secondary)
                 Button { store.showLog.toggle() } label: { Image(systemName: "terminal") }
-                    .buttonStyle(.borderless).help("Derleme günlüğü")
+                    .buttonStyle(.borderless).help(L("Build log"))
             }.padding(.horizontal, 14).frame(height: 32)
         }
         .frame(minWidth: 960, minHeight: 620)
-        .navigationTitle("Benim Raporum")
+        .navigationTitle(L("My Report"))
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                Button(action: store.toggleSidebar) { Label(store.sidebarVisible ? "Dosyaları Gizle" : "Dosyaları Göster", systemImage: "sidebar.left") }
-                    .help("Dosyaları göster/gizle · ⌃⌘S")
+                Button(action: store.toggleSidebar) { Label(store.sidebarVisible ? L("Hide Files") : L("Show Files"), systemImage: "sidebar.left") }
+                    .help(L("Show/hide files · ⌃⌘S"))
             }
             ToolbarItem(placement: .navigation) {
-                Button(action: store.chooseProject) { Label("Proje Aç", systemImage: "folder") }.disabled(store.busy)
+                Button(action: store.chooseProject) { Label(L("Open Project"), systemImage: "folder") }.disabled(store.busy)
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Toggle("Otomatik derle", isOn: $store.autoCompile).toggleStyle(.checkbox).help("Kaydedilen değişikliklerden sonra PDF’i yenile")
+                Toggle(L("Auto compile"), isOn: $store.autoCompile).toggleStyle(.checkbox).help(L("Refresh the PDF after saving changes"))
                 Button(action: { store.compile() }) {
-                    HStack(spacing: 6) { Image(systemName: "play.fill"); Text(store.busy ? "Derleniyor…" : "PDF Derle") }
+                    HStack(spacing: 6) { Image(systemName: "play.fill"); Text(store.busy ? L("Compiling…") : L("Compile PDF")) }
                 }.keyboardShortcut("r", modifiers: .command).disabled(store.busy || store.conflict)
-                Button(action: store.exportPDF) { HStack(spacing: 6) { Image(systemName: "square.and.arrow.up"); Text("PDF Kaydet…") } }.disabled(store.busy)
+                Button(action: store.exportPDF) { HStack(spacing: 6) { Image(systemName: "square.and.arrow.up"); Text(L("Export PDF…")) } }.disabled(store.busy)
             }
         }
         .sheet(isPresented: $store.showLog) {
             VStack(alignment: .leading, spacing: 12) {
-                HStack { Text("Derleme günlüğü").font(.headline); Spacer(); Button("Kapat") { store.showLog = false }.keyboardShortcut(.cancelAction) }
-                ScrollView { Text(store.log.isEmpty ? "Derleme tamamlandığında ayrıntılar burada görünür." : store.log)
+                HStack { Text(L("Build log")).font(.headline); Spacer(); Button(L("Close")) { store.showLog = false }.keyboardShortcut(.cancelAction) }
+                ScrollView { Text(store.log.isEmpty ? L("Build details will appear here when compilation finishes.") : store.log)
                     .font(.system(size: 12, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading) }
             }.padding(20).frame(width: 740, height: 420)
         }
@@ -676,23 +676,23 @@ struct ContentView: View {
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text("Benim Raporum").font(.headline)
-                Text("Metin yazmak için bir bölüm seç.").font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L("My Report")).font(.headline)
+                Text(L("Select a section to start writing.")).font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(16)
             HStack(spacing: 4) {
-                TextField("Dosya veya içerikte ara", text: $store.searchQuery).textFieldStyle(.roundedBorder)
+                TextField(L("Search files or content"), text: $store.searchQuery).textFieldStyle(.roundedBorder)
                     .onSubmit { store.nextMatch() }
-                    .help("Dosya adları ve içerik içinde, küçük yazım farklarını da dikkate alarak ara")
+                    .help(L("Search filenames and content, allowing small typing differences"))
                 if !store.searchQuery.isEmpty {
-                    Button { store.searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless).help("Aramayı temizle")
+                    Button { store.searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless).help(L("Clear search"))
                 }
             }.padding(.horizontal, 12).padding(.bottom, 8)
             if store.searchable {
                 HStack {
-                    Text(store.searchPending ? "Aranıyor…" : "\(store.searchResults.count) dosya · \(store.matchCount) konum")
+                    Text(store.searchPending ? L("Searching…") : L("Files: %d · Matches: %d", store.searchResults.count, store.matchCount))
                     Spacer()
-                    Button { store.nextMatch(backward: true) } label: { Image(systemName: "chevron.up") }.help("Önceki sonuç · ⇧⌘G")
-                    Button { store.nextMatch() } label: { Image(systemName: "chevron.down") }.help("Sonraki sonuç · ⌘G")
+                    Button { store.nextMatch(backward: true) } label: { Image(systemName: "chevron.up") }.help(L("Previous result · ⇧⌘G"))
+                    Button { store.nextMatch() } label: { Image(systemName: "chevron.down") }.help(L("Next result · ⌘G"))
                 }.font(.system(size: 11)).foregroundStyle(.secondary).buttonStyle(.borderless).padding(.horizontal, 12).padding(.bottom, 8)
             }
             ScrollViewReader { proxy in
@@ -700,17 +700,17 @@ struct ContentView: View {
                 LazyVStack(alignment: .leading, spacing: 18) {
                     if store.searchable {
                         if store.searchResults.isEmpty && !store.searchPending {
-                            Text("Sonuç bulunamadı. Daha kısa bir kelime deneyebilirsin.")
+                            Text(L("No results. Try a shorter word."))
                                 .font(.system(size: 12)).foregroundStyle(.secondary).padding(12)
                         }
                         ForEach(store.searchResults) { result in
                             LazyVStack(alignment: .leading, spacing: 3) {
                                 FileRow(title: result.file.title, subtitle: result.file.name, icon: "doc.text", selected: store.selected == result.file, help: result.file.hint) { store.select(result.file) }.frame(height: 51)
                                 if result.matches.isEmpty {
-                                    Text("Dosya adıyla eşleşti").font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12)
+                                    Text(L("Matched filename")).font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 12)
                                 }
                                 ForEach(result.matches) { match in
-                                    FileRow(title: "Satır \(match.line)", subtitle: match.excerpt, icon: "text.alignleft", selected: store.activeMatchID == result.file.path + ":" + match.id, help: match.excerpt) { store.openMatch(result, match) }.frame(height: 51)
+                                    FileRow(title: L("Line %d", match.line), subtitle: match.excerpt, icon: "text.alignleft", selected: store.activeMatchID == result.file.path + ":" + match.id, help: match.excerpt) { store.openMatch(result, match) }.frame(height: 51)
                                 }
                             }
                         }
@@ -721,7 +721,7 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(group).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 5)
                                     ForEach(items) { file in
-                                        FileRow(title: file.title, subtitle: file.name, icon: file.isImage ? "photo" : file.group == "Düzen ve ayarlar" ? "slider.horizontal.3" : file.path.hasSuffix(".bib") ? "books.vertical" : "doc.text", selected: store.selected == file, help: file.hint) { store.select(file) }.frame(height: 51).id(file.id)
+                                        FileRow(title: file.title, subtitle: file.name, icon: file.isImage ? "photo" : file.group == L("Structure and settings") ? "slider.horizontal.3" : file.path.hasSuffix(".bib") ? "books.vertical" : "doc.text", selected: store.selected == file, help: file.hint) { store.select(file) }.frame(height: 51).id(file.id)
                                     }
                                 }
                             }
@@ -736,7 +736,7 @@ struct ContentView: View {
             }
             Spacer(minLength: 0)
             Divider()
-            Button { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: store.root.appendingPathComponent("report").path) } label: { Label("Finder’da Göster", systemImage: "folder") }
+            Button { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: store.root.appendingPathComponent("report").path) } label: { Label(L("Show in Finder"), systemImage: "folder") }
                 .buttonStyle(.borderless).padding(14)
         }.background(Color(nsColor: .controlBackgroundColor))
     }
@@ -744,23 +744,23 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(store.selected?.title ?? "Bir dosya seç").font(.headline)
-                    Text(store.selected?.hint ?? "Soldaki listeden bir bölüm aç.").font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                    Text(store.selected?.title ?? L("Select a file")).font(.headline)
+                    Text(store.selected?.hint ?? L("Open a section from the list on the left.")).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 8)
-                Button { store.fontSize = max(11, store.fontSize - 1) } label: { Image(systemName: "textformat.size.smaller") }.help("Yazıyı küçült")
-                Button { store.fontSize = min(24, store.fontSize + 1) } label: { Image(systemName: "textformat.size.larger") }.help("Yazıyı büyüt")
+                Button { store.fontSize = max(11, store.fontSize - 1) } label: { Image(systemName: "textformat.size.smaller") }.help(L("Decrease text size"))
+                Button { store.fontSize = min(24, store.fontSize + 1) } label: { Image(systemName: "textformat.size.larger") }.help(L("Increase text size"))
             }.buttonStyle(.borderless).padding(.horizontal, 18).frame(height: 66)
             Divider()
-            if store.selected?.group == "Rapor metni" {
+            if store.selected?.group == L("Report text") {
                 HStack(spacing: 6) {
                     Image(systemName: "pencil.line")
-                    Text("Metni buraya yaz. Mavi ifadeler LaTeX komutlarıdır.")
+                    Text(L("Write your text here. Blue expressions are LaTeX commands."))
                 }.font(.system(size: 11)).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.vertical, 9)
                 Divider()
             }
             if store.selected?.isProtected == true {
-                Label("Korunan şablon · salt okunur. Metni bölüm dosyalarında geliştir.", systemImage: "lock")
+                Label(L("Protected template · read-only. Write your content in section files."), systemImage: "lock")
                     .font(.system(size: 11)).foregroundStyle(.secondary).padding(12)
             }
             if let error = store.error {
@@ -768,8 +768,8 @@ struct ContentView: View {
                     Label(error, systemImage: "exclamationmark.triangle").font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
                     if store.conflict {
                         HStack {
-                            Button("Kendi Metnimi Kopyala", action: store.copyDraft)
-                            Button("Diskteki Sürümü Aç", action: store.useDiskVersion)
+                            Button(L("Copy My Draft"), action: store.copyDraft)
+                            Button(L("Open Disk Version"), action: store.useDiskVersion)
                         }
                     }
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(Color.orange.opacity(0.1))
@@ -785,7 +785,7 @@ struct ContentView: View {
             HStack {
                 Text(store.selected?.path ?? "").lineLimit(1).truncationMode(.middle)
                 Spacer()
-                if store.selected?.isImage != true { Text("\(store.text.components(separatedBy: .newlines).count) satır · UTF-8") }
+                if store.selected?.isImage != true { Text(L("Lines: %d · UTF-8", store.text.components(separatedBy: .newlines).count)) }
             }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 14).frame(height: 26)
         }.background(Color(nsColor: .textBackgroundColor))
     }
@@ -793,14 +793,14 @@ struct ContentView: View {
         VStack(spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("PDF önizlemesi").font(.headline)
-                    Text("Metin seç → kaynakta aç").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(L("PDF preview")).font(.headline)
+                    Text(L("Select text → reveal source")).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { zoomDirection = -1; zoomEvent += 1 } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless).help("PDF’i küçült")
-                Button { zoomDirection = 0; zoomEvent += 1 } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.borderless).help("Sayfayı pencereye sığdır")
-                Button { zoomDirection = 1; zoomEvent += 1 } label: { Image(systemName: "plus.magnifyingglass") }.buttonStyle(.borderless).help("PDF’i büyüt")
-                Button { NSWorkspace.shared.open(store.pdfURL) } label: { Image(systemName: "arrow.up.right.square") }.buttonStyle(.borderless).help("Önizleme’de aç")
+                Button { zoomDirection = -1; zoomEvent += 1 } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom out PDF"))
+                Button { zoomDirection = 0; zoomEvent += 1 } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.borderless).help(L("Fit page to window"))
+                Button { zoomDirection = 1; zoomEvent += 1 } label: { Image(systemName: "plus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom in PDF"))
+                Button { NSWorkspace.shared.open(store.pdfURL) } label: { Image(systemName: "arrow.up.right.square") }.buttonStyle(.borderless).help(L("Open in Preview"))
             }.padding(.horizontal, 18).frame(height: 66)
             Divider()
             if FileManager.default.fileExists(atPath: store.pdfURL.path) {
@@ -808,9 +808,9 @@ struct ContentView: View {
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "doc.richtext").font(.system(size: 36)).foregroundStyle(.secondary)
-                    Text("Raporunu burada göreceksin").font(.headline)
-                    Text("Metni düzenle, sonra PDF Derle’ye bas.").font(.callout).foregroundStyle(.secondary)
-                    Button("PDF Derle", action: store.compile).disabled(store.busy)
+                    Text(L("Your report will appear here")).font(.headline)
+                    Text(L("Edit the text, then click Compile PDF.")).font(.callout).foregroundStyle(.secondary)
+                    Button(L("Compile PDF"), action: store.compile).disabled(store.busy)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
@@ -828,9 +828,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let store else { return .terminateNow }
         if store.busy {
             let alert = NSAlert()
-            alert.messageText = "PDF derlemesi sürüyor"
-            alert.informativeText = "Derleme tamamlandığında uygulamayı kapatabilirsin."
-            alert.addButton(withTitle: "Tamam"); alert.runModal()
+            alert.messageText = L("PDF compilation is in progress")
+            alert.informativeText = L("You can quit the app when compilation finishes.")
+            alert.addButton(withTitle: L("OK")); alert.runModal()
             return .terminateCancel
         }
         return store.save() ? .terminateNow : .terminateCancel
@@ -848,16 +848,16 @@ struct RaporApp: App {
         }
         .defaultSize(width: 1360, height: 850)
         .commands {
-            CommandGroup(replacing: .newItem) { Button("Proje Aç…", action: store.chooseProject).keyboardShortcut("o").disabled(store.busy) }
+            CommandGroup(replacing: .newItem) { Button(L("Open Project…"), action: store.chooseProject).keyboardShortcut("o").disabled(store.busy) }
             CommandGroup(replacing: .saveItem) {
-                Button("Kaydet") { _ = store.save() }.keyboardShortcut("s")
-                Button("PDF Kaydet…", action: store.exportPDF).keyboardShortcut("e", modifiers: [.command, .shift]).disabled(store.busy)
+                Button(L("Save")) { _ = store.save() }.keyboardShortcut("s")
+                Button(L("Export PDF…"), action: store.exportPDF).keyboardShortcut("e", modifiers: [.command, .shift]).disabled(store.busy)
             }
             CommandGroup(after: .toolbar) {
-                Button(store.sidebarVisible ? "Dosyaları Gizle" : "Dosyaları Göster", action: store.toggleSidebar).keyboardShortcut("s", modifiers: [.command, .control])
-                Button("Sonraki Arama Sonucu") { store.nextMatch() }.keyboardShortcut("g").disabled(store.matchCount == 0)
-                Button("Önceki Arama Sonucu") { store.nextMatch(backward: true) }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(store.matchCount == 0)
-                Button("Derleme Günlüğü") { store.showLog.toggle() }.keyboardShortcut("l", modifiers: [.command, .shift])
+                Button(store.sidebarVisible ? L("Hide Files") : L("Show Files"), action: store.toggleSidebar).keyboardShortcut("s", modifiers: [.command, .control])
+                Button(L("Next Search Result")) { store.nextMatch() }.keyboardShortcut("g").disabled(store.matchCount == 0)
+                Button(L("Previous Search Result")) { store.nextMatch(backward: true) }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(store.matchCount == 0)
+                Button(L("Build Log")) { store.showLog.toggle() }.keyboardShortcut("l", modifiers: [.command, .shift])
             }
         }
     }

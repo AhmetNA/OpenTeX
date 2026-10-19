@@ -3,6 +3,11 @@ set -euo pipefail
 cd -- "${0:A:h}/.."
 rapor_test_dir=$(mktemp -d /private/tmp/rapor-source-checks.XXXXXX)
 trap 'rm -rf -- "$rapor_test_dir"' EXIT
+mkdir -p "$rapor_test_dir/Translations.bundle/Contents/Resources"
+cp -R Resources/*.lproj "$rapor_test_dir/Translations.bundle/Contents/Resources/"
+printf '<plist version="1.0"><dict><key>CFBundleIdentifier</key><string>com.rapor.translation-checks</string><key>CFBundleDevelopmentRegion</key><string>en</string></dict></plist>' > "$rapor_test_dir/Translations.bundle/Contents/Info.plist"
+swiftc Sources/Localization.swift Tests/LocalizationTests.swift -o "$rapor_test_dir/localization-checks"
+"$rapor_test_dir/localization-checks" "$rapor_test_dir/Translations.bundle"
 swiftc Sources/ReportSearch.swift Tests/SearchTests.swift -o "$rapor_test_dir/search-checks"
 "$rapor_test_dir/search-checks"
 swiftc Sources/ReportSearch.swift Sources/PDFSourceNavigation.swift Tests/PDFSourceNavigationTests.swift -o "$rapor_test_dir/pdf-navigation-checks"

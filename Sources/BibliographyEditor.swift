@@ -15,10 +15,10 @@ struct BibliographyEditor: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
-                if !raw { Text("\(bibliography.entries.count) kaynak").font(.system(size: 12)).foregroundStyle(.secondary) }
+                if !raw { Text(L("References: %d", bibliography.entries.count)).font(.system(size: 12)).foregroundStyle(.secondary) }
                 Spacer(minLength: 8)
-                Picker("Kaynakça görünümü", selection: $raw) {
-                    Text("Kaynaklar").tag(false)
+                Picker(L("Bibliography view"), selection: $raw) {
+                    Text(L("References")).tag(false)
                     Text("BibTeX").tag(true)
                 }.pickerStyle(.segmented).labelsHidden().frame(maxWidth: 220)
             }.padding(.horizontal, 18).padding(.vertical, 12)
@@ -29,16 +29,16 @@ struct BibliographyEditor: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         if bibliography.hasUnparsedEntries {
-                            Label("Bazı kayıtlar okunamadı. BibTeX görünümünden metni kontrol edebilirsin.", systemImage: "exclamationmark.triangle")
+                            Label(L("Some records could not be read. Check the source in BibTeX view."), systemImage: "exclamationmark.triangle")
                                 .font(.system(size: 12)).foregroundStyle(.secondary)
                         }
                         if bibliography.entries.isEmpty {
                             VStack(alignment: .leading, spacing: 10) {
                                 Image(systemName: "books.vertical").font(.system(size: 28)).foregroundStyle(.secondary)
-                                Text("Kaynakların burada görünecek").font(.headline)
-                                Text("BibTeX kayıtları başlık, yazar ve yayın bilgileriyle düzenli bir liste olarak gösterilir.")
+                                Text(L("Your references will appear here")).font(.headline)
+                                Text(L("BibTeX records appear as a readable list with titles, authors and publication details."))
                                     .font(.system(size: 13)).foregroundStyle(.secondary)
-                                Button("BibTeX’i Aç") { raw = true }
+                                Button(L("Open BibTeX")) { raw = true }
                             }.padding(.vertical, 24)
                         }
                         ForEach(bibliography.entries) { entry in
@@ -66,20 +66,20 @@ struct BibliographyEditor: View {
     private func entryCard(_ entry: BibliographyEntry) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .firstTextBaseline) {
-                Text(entry.typeLabel).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+                Text(L(entry.typeLabel)).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
                 Spacer(minLength: 8)
                 if !entry.value("year").isEmpty { Text(entry.value("year")).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
             }
             Text(entry.title).font(.system(size: 16, weight: .semibold)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
             if !entry.authors.isEmpty { Text(entry.authors).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
             if !entry.publication.isEmpty { Text(entry.publication).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true).textSelection(.enabled) }
-            let metadata = [entry.value("volume").isEmpty ? "" : "Cilt " + entry.value("volume"), entry.value("number").isEmpty ? "" : "Sayı " + entry.value("number"), entry.value("pages").isEmpty ? "" : "s. " + entry.value("pages").replacingOccurrences(of: "--", with: "–")].filter { !$0.isEmpty }.joined(separator: " · ")
+            let metadata = [entry.value("volume").isEmpty ? "" : L("Vol. ") + entry.value("volume"), entry.value("number").isEmpty ? "" : L("No. ") + entry.value("number"), entry.value("pages").isEmpty ? "" : L("pp. ") + entry.value("pages").replacingOccurrences(of: "--", with: "–")].filter { !$0.isEmpty }.joined(separator: " · ")
             if !metadata.isEmpty { Text(metadata).font(.system(size: 11)).foregroundStyle(.secondary) }
             HStack(spacing: 14) {
                 if let doi = destination(entry.value("doi"), doi: true) { Link("DOI", destination: doi).font(.system(size: 12)) }
-                if let url = destination(entry.value("url").isEmpty ? entry.value("howpublished") : entry.value("url")) { Link("Kaynağı Aç", destination: url).font(.system(size: 12)) }
+                if let url = destination(entry.value("url").isEmpty ? entry.value("howpublished") : entry.value("url")) { Link(L("Open Source"), destination: url).font(.system(size: 12)) }
                 Spacer(minLength: 8)
-                Button("Düzenle") { editing = BibliographyEditTarget(entry: entry, source: store.text) }.controlSize(.small)
+                Button(L("Edit")) { editing = BibliographyEditTarget(entry: entry, source: store.text) }.controlSize(.small)
             }
             Text(entry.key).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle).textSelection(.enabled)
         }
@@ -115,27 +115,27 @@ struct BibliographyEntryForm: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Kaynağı Düzenle").font(.title3).fontWeight(.semibold)
-                    Text(target.entry.typeLabel + " · " + target.entry.key).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                    Text(L("Edit Reference")).font(.title3).fontWeight(.semibold)
+                    Text(L(target.entry.typeLabel) + " · " + target.entry.key).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer()
-                Button("BibTeX’i Aç", action: openRaw).controlSize(.small)
+                Button(L("Open BibTeX"), action: openRaw).controlSize(.small)
             }.padding(20)
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(target.entry.fields) { field in
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(field.label).font(.system(size: 12, weight: .medium))
+                            Text(L(field.label)).font(.system(size: 12, weight: .medium))
                             if field.editable {
-                                TextField(field.label, text: Binding(get: { values[field.name] ?? "" }, set: { values[field.name] = $0 }), axis: .vertical)
+                                TextField(L(field.label), text: Binding(get: { values[field.name] ?? "" }, set: { values[field.name] = $0 }), axis: .vertical)
                                     .textFieldStyle(.roundedBorder).lineLimit(1...6)
                                 if field.name == "author" || field.name == "editor" {
-                                    Text("Birden fazla kişi arasında ‘and’ kullan.").font(.system(size: 11)).foregroundStyle(.secondary)
+                                    Text(L("Separate multiple names with ‘and’.")).font(.system(size: 11)).foregroundStyle(.secondary)
                                 }
                             } else {
                                 Text(Bibliography.display(field.value)).font(.system(size: 13)).textSelection(.enabled)
-                                Text("Bu alan bir BibTeX ifadesi kullanıyor. Değiştirmek için BibTeX’i aç.").font(.system(size: 11)).foregroundStyle(.secondary)
+                                Text(L("This field uses a BibTeX expression. Open BibTeX to edit it.")).font(.system(size: 11)).foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -145,8 +145,8 @@ struct BibliographyEntryForm: View {
             Divider()
             HStack {
                 Spacer()
-                Button("Vazgeç") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Uygula") {
+                Button(L("Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(L("Apply")) {
                     error = save(values)
                     if error == nil { dismiss() }
                 }.keyboardShortcut(.defaultAction)

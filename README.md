@@ -1,6 +1,6 @@
 # Rapor
 
-A small native macOS workspace for local LaTeX reports: files on the left, source in the middle, and a compiled PDF on the right. Built with SwiftUI, AppKit and PDFKit, without a web server or external application framework. The current interface is Turkish.
+A small native macOS workspace for local LaTeX reports: files on the left, source in the middle, and a compiled PDF on the right. Built with SwiftUI, AppKit and PDFKit, without a web server or external application framework. The interface follows your primary macOS language: Turkish and English are supported, with English used for any other language. Report text and bibliography content are never translated. Restart the app after changing the macOS language.
 
 ## Features
 
@@ -41,7 +41,7 @@ RAPOR_ALLOW_ADHOC=1 ./build.sh
 
 Ad-hoc builds may ask for file access again after updates. Builds are not notarized or App Store distributions. No signing certificates or private keys are included.
 
-The app initially opens `examples/starter`. To use your own project, choose **Proje Aç** or launch with:
+The app initially opens `examples/starter`. To use your own project, choose **Open Project** (**Proje Aç** in Turkish) or launch with:
 
 ```sh
 open -n dist/Rapor.app --args --project /path/to/project --file kaynaklar.bib
@@ -84,7 +84,7 @@ Files are local. There is no application account, hosted compiler, telemetry or 
 python3 examples/starter/scripts/build_report.py
 ```
 
-Checks cover source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
+Checks cover system-language selection, both translation catalogs and English fallback, source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
 
 ## Scope and licence
 
