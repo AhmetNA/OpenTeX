@@ -116,9 +116,18 @@ import PDFKit
         preview.frame = NSRect(x: 320, y: 0, width: 330, height: 300)
         container.addSubview(sourceEditor); container.addSubview(preview)
         assert(window.makeFirstResponder(sourceEditor))
+        // Reparenting a previously selected PDFView can emit a delayed layout notification.
+        // Start the simulated editor gesture only after that fixture setup has settled.
+        preview.clearSelection(); coordinator.cancelPendingSelection()
+        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.3))
         sourceEditor.setSelectedRange((store.text as NSString).range(of: "features"))
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
-        let request = store.pdfRevealRequest!
+        let forwardDeadline = Date(timeIntervalSinceNow: 2)
+        while store.pdfRevealRequest == nil && Date() < forwardDeadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+        }
+        guard let request = store.pdfRevealRequest else {
+            fatalError("Editor selection was not delivered: range=\(sourceEditor.selectedRange()), path=\(String(describing: store.selected?.path)), sourceMatches=\(sourceEditor.string == store.text), mouseButtons=\(NSEvent.pressedMouseButtons)")
+        }
         let beforeForwardCallbacks = callbacks, beforeForwardJump = store.jumpRevision
         assert(coordinator.reveal(request))
         assert(preview.currentSelection!.string!.trimmingCharacters(in: .whitespacesAndNewlines) == "features")
@@ -134,7 +143,10 @@ import PDFKit
         // A new user selection after a programmatic source jump is delivered normally.
         sourceEditor.setSelectedRange(NSRange(location: 0, length: 0))
         sourceEditor.setSelectedRange((store.text as NSString).range(of: "Artist"))
-        RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.25))
+        let reselectionDeadline = Date(timeIntervalSinceNow: 2)
+        while store.pdfRevealRevision == beforeEditorReveal && Date() < reselectionDeadline {
+            RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.02))
+        }
         assert(store.pdfRevealRevision > beforeEditorReveal)
         let latestRequest = store.pdfRevealRequest!
         assert(coordinator.reveal(latestRequest))
