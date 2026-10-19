@@ -25,6 +25,11 @@ struct FileSearchResult: Identifiable {
 final class ReportStore: ObservableObject {
     @Published var root: URL
     @Published var files: [ReportFile] = []
+    @Published var workspace = WorkspaceLayout()
+    @Published var showOrganizer = false
+    private(set) var workspaceSnapshot: Data?
+    private var workspaceReadable = true
+    var workspaceURL: URL { root.appendingPathComponent(".opentex/workspace.json") }
     @Published var selected: ReportFile?
     @Published var text = ""
     @Published var dirty = false
@@ -56,7 +61,7 @@ final class ReportStore: ObservableObject {
     private var observedPDFDate: Date?
     var pdfURL: URL { root.appendingPathComponent("output/pdf/bitirme-raporu.pdf") }
     var fileURL: URL? { selected.map { root.appendingPathComponent("report/" + $0.path) } }
-    var groups: [String] { [L("Report text"), L("Document"), L("Structure and settings"), L("Protected template"), L("Images")] }
+    var groups: [WorkspaceGroup] { workspace.groups }
 
     init() {
         let args = CommandLine.arguments
@@ -75,18 +80,22 @@ final class ReportStore: ObservableObject {
 
     func scan() {
         let folder = root.appendingPathComponent("report")
-        let known: [String: (String, String, String)] = [
-            "sections/01-introduction.tex": (L("Introduction"), L("Purpose, scope and literature"), L("Report text")),
-            "sections/02-analysis.tex": (L("Analysis and feasibility"), L("Requirements and feasibility"), L("Report text")),
-            "sections/03-design.tex": (L("System design"), L("Data, methods and system flow"), L("Report text")),
-            "sections/04-results.tex": (L("Experimental results"), L("Experiments and comparisons"), L("Report text")),
-            "sections/05-discussion.tex": (L("Conclusion and discussion"), L("Contributions, limitations and future work"), L("Report text")),
-            "sections/06-appendices.tex": (L("Appendices"), L("Supporting documents and links"), L("Report text")),
-            "metadata.tex": (L("Cover details"), L("Title, student, supervisor and date"), L("Document")),
-            "cover.tex": (L("Cover template"), L("Fixed format · read-only"), L("Protected template")),
-            "kaynaklar.bib": (L("Bibliography"), L("Reference records"), L("Document")),
-            "rapor.tex": (L("Section order"), L("Main file · write content in section files"), L("Structure and settings")),
-            "preamble.tex": (L("Layout template"), L("Fixed typography and page layout · read-only"), L("Protected template"))
+        let previous = files
+        workspaceSnapshot = try? Data(contentsOf: workspaceURL)
+        var saved: WorkspaceLayout?
+        workspaceReadable = true
+        if let data = workspaceSnapshot {
+            if let decoded = try? JSONDecoder().decode(WorkspaceLayout.self, from: data), decoded.isValid() { saved = decoded }
+            else { workspaceReadable = false; error = L("The saved file layout could not be read. Your configuration was kept unchanged.") }
+        } else if FileManager.default.fileExists(atPath: workspaceURL.path) {
+            workspaceReadable = false
+            error = L("The saved file layout could not be read. Your configuration was kept unchanged.")
+        }
+        let special: [String: (String, String)] = [
+            "metadata.tex": (L("Cover details"), L("Title, student, supervisor and date")),
+            "rapor.tex": (L("Section order"), L("Main file · write content in section files")),
+            "cover.tex": (L("Cover template"), L("Fixed format · read-only")),
+            "preamble.tex": (L("Layout template"), L("Fixed typography and page layout · read-only"))
         ]
         var result: [ReportFile] = []
         if let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
@@ -96,17 +105,45 @@ final class ReportStore: ObservableObject {
                 if relative.hasPrefix("template-original/") || relative.hasPrefix("build/") { enumerator.skipDescendants(); continue }
                 guard ["tex", "bib", "png", "jpg", "jpeg", "webp"].contains(url.pathExtension.lowercased()),
                       (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
-                let details = known[relative]
-                let group = details?.2 ?? (["tex", "bib"].contains(url.pathExtension) ? L("Report text") : L("Images"))
-                result.append(ReportFile(path: relative, title: details?.0 ?? url.deletingPathExtension().lastPathComponent,
-                                         hint: details?.1 ?? relative, group: group))
+                let content = url.pathExtension.lowercased() == "tex" ? (relative == selected?.path ? text : ((try? String(contentsOf: url, encoding: .utf8)) ?? "")) : ""
+                let automatic = special[relative]?.0 ?? (url.pathExtension.lowercased() == "tex" ? WorkspaceLayout.sourceTitle(content, path: relative) : WorkspaceLayout.readableName(url.deletingPathExtension().lastPathComponent))
+                let custom = saved?.files[relative]?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+                result.append(ReportFile(path: relative, title: custom?.isEmpty == false ? custom! : automatic,
+                                         hint: special[relative]?.1 ?? relative, group: ""))
             }
         }
-        files = result.sorted { a,b in
-            let ga = groups.firstIndex(of: a.group) ?? 0, gb = groups.firstIndex(of: b.group) ?? 0
+        let paths = result.map(\.path)
+        let updatedWorkspace = saved?.including(paths: paths) ?? .automatic(paths: paths)
+        if workspace != updatedWorkspace { workspace = updatedWorkspace }
+        let updatedFiles = result.map { file in
+            ReportFile(path: file.path, title: file.title, hint: file.hint, group: workspace.files[file.path]?.groupID ?? WorkspaceLayout.ungrouped.id)
+        }.sorted { a,b in
+            let ga = groups.firstIndex(where: { $0.id == a.group }) ?? 0, gb = groups.firstIndex(where: { $0.id == b.group }) ?? 0
             return ga == gb ? a.path < b.path : ga < gb
         }
+        if files != updatedFiles { files = updatedFiles }
+        // Metadata changes must never reload or save the current draft, reset undo, or lose its source selection.
+        if let path = selected?.path, let updated = files.first(where: { $0.path == path }), updated != selected { selected = updated }
+        if searchable && previous != files { scheduleSearch() }
         if files.isEmpty { error = L("Report files were not found. Use Open Project to select the report project folder.") }
+    }
+
+    func saveWorkspace(_ layout: WorkspaceLayout, original: Data?, expectedRoot: URL) -> String? {
+        guard root == expectedRoot else { return L("The project changed. Reopen Organize Files and try again.") }
+        guard workspaceReadable else { return L("The saved file layout could not be read. Your configuration was kept unchanged.") }
+        let names = layout.groups.map { ($0.localizeName ? L($0.name) : $0.name).trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+        guard layout.isValid(), Set(names).count == names.count else { return L("Give every group a unique, nonempty name.") }
+        do {
+            let current = FileManager.default.fileExists(atPath: workspaceURL.path) ? try Data(contentsOf: workspaceURL) : nil
+            guard current == original else { return L("The file layout changed elsewhere. Reopen Organize Files to load the latest version.") }
+            let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            let data = try encoder.encode(layout.including(paths: files.map(\.path)))
+            try FileManager.default.createDirectory(at: workspaceURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: workspaceURL, options: .atomic)
+            scan()
+            status = L("File layout saved")
+            return nil
+        } catch { return L("Could not save file layout: %@", error.localizedDescription) }
     }
 
     func toggleSidebar() { sidebarVisible.toggle() }
@@ -270,6 +307,7 @@ final class ReportStore: ObservableObject {
     }
 
     func checkExternalChanges() {
+        scan()
         if let url = fileURL, selected?.isImage == false,
            let current = try? String(contentsOf: url, encoding: .utf8), current != diskText {
             if dirty { conflict = true; error = L("The file changed elsewhere. Choose a version before saving.") }
@@ -321,7 +359,7 @@ final class ReportStore: ObservableObject {
         environment["PATH"] = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
         job.environment = environment
         // Write to a temporary log, avoiding pipe deadlocks during long first builds.
-        let logURL = FileManager.default.temporaryDirectory.appendingPathComponent("rapor-\(UUID().uuidString).log")
+        let logURL = FileManager.default.temporaryDirectory.appendingPathComponent("opentex-\(UUID().uuidString).log")
         FileManager.default.createFile(atPath: logURL.path, contents: nil)
         do {
             let handle = try FileHandle(forWritingTo: logURL)
@@ -642,13 +680,13 @@ struct ContentView: View {
                 else { Image(systemName: store.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(store.error == nil ? Color.secondary : Color.orange) }
                 Text(store.status).font(.system(size: 12))
                 Spacer()
-                Text(L("My Report · %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development"))).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(L("OpenTeX · %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development"))).font(.system(size: 11)).foregroundStyle(.secondary)
                 Button { store.showLog.toggle() } label: { Image(systemName: "terminal") }
                     .buttonStyle(.borderless).help(L("Build log"))
             }.padding(.horizontal, 14).frame(height: 32)
         }
         .frame(minWidth: 960, minHeight: 620)
-        .navigationTitle(L("My Report"))
+        .navigationTitle("OpenTeX")
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button(action: store.toggleSidebar) { Label(store.sidebarVisible ? L("Hide Files") : L("Show Files"), systemImage: "sidebar.left") }
@@ -665,6 +703,7 @@ struct ContentView: View {
                 Button(action: store.exportPDF) { HStack(spacing: 6) { Image(systemName: "square.and.arrow.up"); Text(L("Export PDF…")) } }.disabled(store.busy)
             }
         }
+        .sheet(isPresented: $store.showOrganizer) { WorkspaceOrganizer(store: store) }
         .sheet(isPresented: $store.showLog) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack { Text(L("Build log")).font(.headline); Spacer(); Button(L("Close")) { store.showLog = false }.keyboardShortcut(.cancelAction) }
@@ -676,7 +715,12 @@ struct ContentView: View {
     var sidebar: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(L("My Report")).font(.headline)
+                HStack {
+                    Text("OpenTeX").font(.headline)
+                    Spacer()
+                    Button { store.showOrganizer = true } label: { Image(systemName: "slider.horizontal.3") }
+                        .buttonStyle(.borderless).help(L("Organize Files"))
+                }
                 Text(L("Select a section to start writing.")).font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(16)
             HStack(spacing: 4) {
@@ -715,13 +759,13 @@ struct ContentView: View {
                             }
                         }
                     } else {
-                        ForEach(store.groups, id: \.self) { group in
-                            let items = store.files.filter { $0.group == group }
+                        ForEach(store.groups) { group in
+                            let items = store.files.filter { $0.group == group.id }
                             if !items.isEmpty {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(group).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 5)
+                                    Text(group.localizeName ? L(group.name) : group.name).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 5)
                                     ForEach(items) { file in
-                                        FileRow(title: file.title, subtitle: file.name, icon: file.isImage ? "photo" : file.group == L("Structure and settings") ? "slider.horizontal.3" : file.path.hasSuffix(".bib") ? "books.vertical" : "doc.text", selected: store.selected == file, help: file.hint) { store.select(file) }.frame(height: 51).id(file.id)
+                                        FileRow(title: file.title, subtitle: file.name, icon: file.isImage ? "photo" : file.path == "rapor.tex" ? "slider.horizontal.3" : file.path.hasSuffix(".bib") ? "books.vertical" : "doc.text", selected: store.selected == file, help: file.hint) { store.select(file) }.frame(height: 51).id(file.id)
                                     }
                                 }
                             }
@@ -752,7 +796,7 @@ struct ContentView: View {
                 Button { store.fontSize = min(24, store.fontSize + 1) } label: { Image(systemName: "textformat.size.larger") }.help(L("Increase text size"))
             }.buttonStyle(.borderless).padding(.horizontal, 18).frame(height: 66)
             Divider()
-            if store.selected?.group == L("Report text") {
+            if store.selected?.path.hasSuffix(".tex") == true && store.selected?.isProtected == false {
                 HStack(spacing: 6) {
                     Image(systemName: "pencil.line")
                     Text(L("Write your text here. Blue expressions are LaTeX commands."))
@@ -839,7 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 #if !RAPOR_TEST
 @main
-struct RaporApp: App {
+struct OpenTeXApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @StateObject private var store = ReportStore()
     var body: some Scene {
@@ -855,6 +899,7 @@ struct RaporApp: App {
             }
             CommandGroup(after: .toolbar) {
                 Button(store.sidebarVisible ? L("Hide Files") : L("Show Files"), action: store.toggleSidebar).keyboardShortcut("s", modifiers: [.command, .control])
+                Button(L("Organize Files…")) { store.showOrganizer = true }
                 Button(L("Next Search Result")) { store.nextMatch() }.keyboardShortcut("g").disabled(store.matchCount == 0)
                 Button(L("Previous Search Result")) { store.nextMatch(backward: true) }.keyboardShortcut("g", modifiers: [.command, .shift]).disabled(store.matchCount == 0)
                 Button(L("Build Log")) { store.showLog.toggle() }.keyboardShortcut("l", modifiers: [.command, .shift])

@@ -3,6 +3,7 @@ import Foundation
 import PDFKit
 
 @main struct AppChecks {
+    static func tryLayoutBytes(_ url: URL) -> Data { (try? Data(contentsOf: url)) ?? Data() }
     @MainActor static func main() throws {
         _ = NSApplication.shared
         let store = ReportStore()
@@ -151,6 +152,40 @@ import PDFKit
         assert(store.selected == analysis && store.conflict && store.text.contains("local conflict draft"))
         store.openPDFSelection("features", pageText: "Audio features describe a song.", pageRange: NSRange(location: 6, length: 8))
         assert(store.selected == analysis && store.conflict && store.text.contains("local conflict draft"))
+        // Sidebar configuration is project-local and never saves/discards a conflicting source draft.
+        let draft = store.text, diskBeforeLayout = try String(contentsOf: store.fileURL!, encoding: .utf8)
+        let jump = store.jumpRange, pathBeforeLayout = store.selected!.path
+        var layout = store.workspace
+        layout.groups.insert(WorkspaceGroup(id: "custom", name: "Research"), at: 0)
+        layout.files[analysis.path] = WorkspaceFileSettings(groupID: "custom", title: "My analysis")
+        let originalLayout = store.workspaceSnapshot
+        assert(store.saveWorkspace(layout, original: originalLayout, expectedRoot: store.root) == nil)
+        assert(store.selected?.path == pathBeforeLayout && store.selected?.title == "My analysis")
+        assert(store.dirty && store.conflict && store.text == draft && store.jumpRange == jump)
+        let diskAfterLayout = try String(contentsOf: store.fileURL!, encoding: .utf8)
+        assert(diskAfterLayout == diskBeforeLayout)
+        assert(store.files.first { $0.path == "preamble.tex" }!.isProtected)
+        assert(store.groups.first?.id == "custom")
+        let reopened = ReportStore()
+        assert(reopened.workspace.groups.first?.id == "custom")
+        assert(reopened.files.first { $0.path == analysis.path }?.title == "My analysis")
+        // Discover and label new files added by a user or another editor without reopening the project.
+        let newFile = store.root.appendingPathComponent("report/sections/03-user-method.tex")
+        try "\\section{User-defined methodology}\n".write(to: newFile, atomically: true, encoding: .utf8)
+        store.checkExternalChanges()
+        assert(store.files.contains { $0.path == "sections/03-user-method.tex" && $0.title == "User-defined methodology" })
+        assert(store.text == draft && store.conflict)
+        // An open form may not overwrite another editor's layout changes or unreadable JSON.
+        let savedLayout = try Data(contentsOf: store.workspaceURL)
+        try Data("{broken json".utf8).write(to: store.workspaceURL)
+        assert(store.saveWorkspace(layout, original: savedLayout, expectedRoot: store.root) != nil)
+        store.scan()
+        assert(store.saveWorkspace(layout, original: store.workspaceSnapshot, expectedRoot: store.root) != nil)
+        assert(tryLayoutBytes(store.workspaceURL) == Data("{broken json".utf8))
+        try savedLayout.write(to: store.workspaceURL)
+        store.scan()
+        assert(store.saveWorkspace(layout, original: savedLayout, expectedRoot: URL(fileURLWithPath: "/other")) != nil)
+        print("PASS: project-local groups and labels persist; live discovery, protected files, source drafts, selection, malformed config and concurrent changes are safe.")
         print("PASS: one native click, blank row hit area, inactive-window first-click acceptance, synchronous file switch/save, sidebar toggle, grouped content search, range navigation, typo match, PDFKit selection notification and source navigation, editor selection, conflict protection.")
     }
 }

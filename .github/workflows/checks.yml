@@ -10,4 +10,4 @@ jobs:
       - name: Run Swift and native integration checks
         run: ./Tests/run.sh
       - name: Build application for local testing
-        run: RAPOR_ALLOW_ADHOC=1 ./build.sh
+        run: OPENTEX_ALLOW_ADHOC=1 ./build.sh

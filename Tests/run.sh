@@ -14,6 +14,8 @@ swiftc Sources/ReportSearch.swift Sources/PDFSourceNavigation.swift Tests/PDFSou
 "$rapor_test_dir/pdf-navigation-checks"
 swiftc Sources/Bibliography.swift Tests/BibliographyTests.swift -o "$rapor_test_dir/bibliography-checks"
 "$rapor_test_dir/bibliography-checks" "examples/starter/report/kaynaklar.bib"
+swiftc Sources/Bibliography.swift Sources/WorkspaceLayout.swift Tests/WorkspaceTests.swift -o "$rapor_test_dir/workspace-checks"
+"$rapor_test_dir/workspace-checks"
 mkdir -p "$rapor_test_dir/project/report/sections"
 printf 'Rust ownership. Rust memory.\n' > "$rapor_test_dir/project/report/sections/01-introduction.tex"
 printf 'Rust compiler.\n' > "$rapor_test_dir/project/report/sections/02-analysis.tex"

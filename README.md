@@ -1,6 +1,8 @@
-# Rapor
+# OpenTeX
 
-A small native macOS workspace for local LaTeX reports: files on the left, source in the middle, and a compiled PDF on the right. Built with SwiftUI, AppKit and PDFKit, without a web server or external application framework. The interface follows your primary macOS language: Turkish and English are supported, with English used for any other language. Report text and bibliography content are never translated. Restart the app after changing the macOS language.
+A small native macOS LaTeX editor and workspace for local LaTeX reports: files on the left, source in the middle, and a compiled PDF on the right. Built with SwiftUI, AppKit and PDFKit, without a web server or external application framework. The interface follows your primary macOS language: Turkish and English are supported, with English used for any other language. Report text and bibliography content are never translated. Restart the app after changing the macOS language.
+
+Previously named **Rapor**. Repository: [AhmetNA/OpenTeX](https://github.com/AhmetNA/OpenTeX).
 
 ## Features
 
@@ -10,6 +12,7 @@ A small native macOS workspace for local LaTeX reports: files on the left, sourc
 - Browse references as readable records, edit literal fields in a form, or switch to raw BibTeX. Unknown fields, comments and directives are preserved; macro expressions remain available in raw mode.
 - Select PDF text to reveal its matching source. Cover fields prefer editable metadata. This uses text/context matching, not SyncTeX; ambiguous text, equations and generated labels may not resolve.
 - Search filenames and content with Turkish/case normalisation and limited typo tolerance.
+- Organize files into your own named groups, change their order and set optional display names. New files are discovered automatically; section labels come from LaTeX headings or filenames.
 - Hide the file sidebar, resize panes, zoom the PDF and export it.
 - Detect external source changes and protect conflicting unsaved drafts.
 
@@ -28,15 +31,15 @@ A small native macOS workspace for local LaTeX reports: files on the left, sourc
 
 ```sh
 ./build.sh
-open dist/Rapor.app
+open dist/OpenTeX.app
 ```
 
-The build selects an available Apple Development/Developer ID Application identity. You can pin one with `RAPOR_SIGNING_IDENTITY`. Consistent signing allows macOS to recognise updates as the same application and retain file-access consent. The first access, or migration from an ad-hoc build, can still require one macOS approval. The app does not bypass privacy controls.
+The build selects an available Apple Development/Developer ID Application identity. You can pin one with `OPENTEX_SIGNING_IDENTITY`. Consistent signing allows macOS to recognise updates as the same application and retain file-access consent. The first access, or migration from an ad-hoc build, can still require one macOS approval. The app does not bypass privacy controls.
 
 If you have no signing identity, an explicit local-only build is available:
 
 ```sh
-RAPOR_ALLOW_ADHOC=1 ./build.sh
+OPENTEX_ALLOW_ADHOC=1 ./build.sh
 ```
 
 Ad-hoc builds may ask for file access again after updates. Builds are not notarized or App Store distributions. No signing certificates or private keys are included.
@@ -44,7 +47,7 @@ Ad-hoc builds may ask for file access again after updates. Builds are not notari
 The app initially opens `examples/starter`. To use your own project, choose **Open Project** (**Proje Aç** in Turkish) or launch with:
 
 ```sh
-open -n dist/Rapor.app --args --project /path/to/project --file kaynaklar.bib
+open -n dist/OpenTeX.app --args --project /path/to/project --file kaynaklar.bib
 ```
 
 ## Project layout
@@ -66,6 +69,14 @@ project/
 
 Files are local. There is no application account, hosted compiler, telemetry or built-in AI service. Tectonic may download TeX packages on its first compilation. DOI/source links open in your default browser only when clicked.
 
+## Organize your project
+
+Click the sliders button beside **OpenTeX** in the sidebar, or choose **View → Organize Files…**. Add, rename, reorder or remove groups; use each file’s group picker to assign it. Leave a display name empty to use the first `\chapter` / `\section` heading, or the filename if no heading is available. Removing a group keeps its files under **Ungrouped**. **Use Automatic Groups** restores groups inferred from folders and file types; **Cancel** discards changes in the dialog.
+
+The layout is stored in `.opentex/workspace.json` in the selected project, and travels with that project. It affects the sidebar only: source paths and the `\input` order in `report/rapor.tex` stay unchanged. User-written group/display names are kept as entered; automatically generated interface labels follow the system language. New files join a matching automatic group when available, otherwise **Ungrouped**. An unreadable layout or another editor’s concurrent changes are preserved instead of overwritten.
+
+![Project-local file grouping](docs/groups.png)
+
 ## Keyboard shortcuts
 
 | Action | Shortcut |
@@ -84,8 +95,8 @@ Files are local. There is no application account, hosted compiler, telemetry or 
 python3 examples/starter/scripts/build_report.py
 ```
 
-Checks cover system-language selection, both translation catalogs and English fallback, source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
+Checks cover system-language selection, both translation catalogs and English fallback, editable project layouts and live file discovery, source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
 
 ## Scope and licence
 
-Rapor's source, application icon and original starter files are distributed under the [MIT License](LICENSE). User documents, institutional templates and third-party research datasets are not included. Apple system frameworks and Tectonic remain subject to their own licences; they are not bundled in this repository.
+OpenTeX's source, application icon and original starter files are distributed under the [MIT License](LICENSE). User documents, institutional templates and third-party research datasets are not included. Apple system frameworks and Tectonic remain subject to their own licences; they are not bundled in this repository.
