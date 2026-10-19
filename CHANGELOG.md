@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.1
+
+- Show compact icons for auto compile, compile PDF and PDF export, with translated hover descriptions and keyboard hints.
+- Keep the auto-compile state visible through the native toggle button; constrain long titles/status text to avoid toolbar and pane-header overflow.
+
 ## 1.7.0
 
 - Select source text to scroll to and highlight its matching PDF passage automatically.

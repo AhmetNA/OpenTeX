@@ -19,7 +19,7 @@ swiftc -parse-as-library -O -target "${rapor_arch}-apple-macosx14.0" Sources/*.s
 from pathlib import Path
 import plistlib
 # Keep the original bundle identifier so upgrades retain project settings and signing identity.
-info={'CFBundleExecutable':'OpenTeX','CFBundleIdentifier':'com.ahmetna.rapor','CFBundleIconFile':'AppIcon','CFBundleName':'OpenTeX','CFBundleDisplayName':'OpenTeX','CFBundlePackageType':'APPL','CFBundleShortVersionString':'1.7.0','CFBundleVersion':'10','CFBundleDevelopmentRegion':'en','CFBundleLocalizations':['en','tr'],'LSMinimumSystemVersion':'14.0','NSHighResolutionCapable':True,'DefaultProjectPath':str(Path.cwd()/'examples/starter'),'NSHumanReadableCopyright':'Copyright 2026 Ahmet Nuri Aydemir. MIT License.'}
+info={'CFBundleExecutable':'OpenTeX','CFBundleIdentifier':'com.ahmetna.rapor','CFBundleIconFile':'AppIcon','CFBundleName':'OpenTeX','CFBundleDisplayName':'OpenTeX','CFBundlePackageType':'APPL','CFBundleShortVersionString':'1.7.1','CFBundleVersion':'11','CFBundleDevelopmentRegion':'en','CFBundleLocalizations':['en','tr'],'LSMinimumSystemVersion':'14.0','NSHighResolutionCapable':True,'DefaultProjectPath':str(Path.cwd()/'examples/starter'),'NSHumanReadableCopyright':'Copyright 2026 Ahmet Nuri Aydemir. MIT License.'}
 Path('dist/OpenTeX.app/Contents/Info.plist').write_bytes(plistlib.dumps(info))
 PLIST
 cp Assets/AppIcon.icns dist/OpenTeX.app/Contents/Resources/AppIcon.icns

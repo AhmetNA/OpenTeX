@@ -200,3 +200,7 @@
 "Selection found in PDF" = "Seçim PDF’te bulundu";
 "No PDF match · compile the PDF or select a longer passage" = "PDF’te eşleşme yok · PDF’i derle veya daha uzun bir metin seç";
 "Select text ↔ reveal in source or PDF" = "Metin seç ↔ kaynakta veya PDF’te bul";
+"Auto compile: on · click to turn off" = "Otomatik derleme açık · kapatmak için tıkla";
+"Auto compile: off · click to turn on" = "Otomatik derleme kapalı · açmak için tıkla";
+"Compile PDF · ⌘R" = "PDF Derle · ⌘R";
+"Export PDF · ⇧⌘E" = "PDF Kaydet · ⇧⌘E";

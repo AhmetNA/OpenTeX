@@ -200,3 +200,7 @@
 "Selection found in PDF" = "Selection found in PDF";
 "No PDF match · compile the PDF or select a longer passage" = "No PDF match · compile the PDF or select a longer passage";
 "Select text ↔ reveal in source or PDF" = "Select text ↔ reveal in source or PDF";
+"Auto compile: on · click to turn off" = "Auto compile: on · click to turn off";
+"Auto compile: off · click to turn on" = "Auto compile: off · click to turn on";
+"Compile PDF · ⌘R" = "Compile PDF · ⌘R";
+"Export PDF · ⇧⌘E" = "Export PDF · ⇧⌘E";

@@ -13,7 +13,7 @@ Previously named **Rapor**. Repository: [AhmetNA/OpenTeX](https://github.com/Ahm
 - Select text in either the source editor or PDF to reveal the matching location on the other side. Editor selections scroll to and highlight the PDF while preserving keyboard focus; cover fields prefer editable metadata/the cover page. This uses text/context matching, not SyncTeX; ambiguous text, equations, generated labels and text absent from the current PDF may not resolve. Long source selections reveal their opening passage.
 - Search filenames and content with Turkish/case normalisation and limited typo tolerance.
 - Organize files into your own named groups, change their order and set optional display names. New files are discovered automatically; section labels come from LaTeX headings or filenames.
-- Hide the file sidebar, resize panes, zoom the PDF and export it.
+- Use compact toolbar icons for auto compile, compilation and export; hover for descriptions and keyboard shortcuts. Hide the file sidebar, resize panes and zoom the PDF.
 - Detect external source changes and protect conflicting unsaved drafts.
 
 ![Readable bibliography workspace](docs/bibliography.png)

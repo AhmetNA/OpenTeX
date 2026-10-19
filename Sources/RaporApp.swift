@@ -787,6 +787,33 @@ struct FileRow: NSViewRepresentable {
     }
 }
 
+struct BuildToolbarControls: View {
+    @ObservedObject var store: ReportStore
+    var body: some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: $store.autoCompile) {
+                Label(L("Auto compile"), systemImage: "arrow.triangle.2.circlepath")
+            }
+            .toggleStyle(.button)
+            .labelStyle(.iconOnly)
+            .help(store.autoCompile ? L("Auto compile: on · click to turn off") : L("Auto compile: off · click to turn on"))
+            Button(action: store.compile) {
+                Label(store.busy ? L("Compiling…") : L("Compile PDF"), systemImage: store.busy ? "hourglass" : "play.fill")
+            }
+            .labelStyle(.iconOnly)
+            .help(store.busy ? L("Compiling…") : L("Compile PDF · ⌘R"))
+            .keyboardShortcut("r", modifiers: .command)
+            .disabled(store.busy || store.conflict)
+            Button(action: store.exportPDF) {
+                Label(L("Export PDF…"), systemImage: "square.and.arrow.up")
+            }
+            .labelStyle(.iconOnly)
+            .help(L("Export PDF · ⇧⌘E"))
+            .disabled(store.busy)
+        }.fixedSize()
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var store: ReportStore
     @State private var zoomEvent = 0
@@ -802,9 +829,9 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 if store.busy { ProgressView().controlSize(.small) }
                 else { Image(systemName: store.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(store.error == nil ? Color.secondary : Color.orange) }
-                Text(store.status).font(.system(size: 12))
+                Text(store.status).font(.system(size: 12)).lineLimit(1).truncationMode(.tail).help(store.status)
                 Spacer()
-                Text(L("OpenTeX · %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development"))).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text(L("OpenTeX · %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development"))).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
                 Button { store.showLog.toggle() } label: { Image(systemName: "terminal") }
                     .buttonStyle(.borderless).help(L("Build log"))
             }.padding(.horizontal, 14).frame(height: 32)
@@ -817,14 +844,11 @@ struct ContentView: View {
                     .help(L("Show/hide files · ⌃⌘S"))
             }
             ToolbarItem(placement: .navigation) {
-                Button(action: store.chooseProject) { Label(L("Open Project"), systemImage: "folder") }.disabled(store.busy)
+                Button(action: store.chooseProject) { Label(L("Open Project"), systemImage: "folder") }
+                    .labelStyle(.iconOnly).help(L("Open Project")).disabled(store.busy)
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Toggle(L("Auto compile"), isOn: $store.autoCompile).toggleStyle(.checkbox).help(L("Refresh the PDF after saving changes"))
-                Button(action: { store.compile() }) {
-                    HStack(spacing: 6) { Image(systemName: "play.fill"); Text(store.busy ? L("Compiling…") : L("Compile PDF")) }
-                }.keyboardShortcut("r", modifiers: .command).disabled(store.busy || store.conflict)
-                Button(action: store.exportPDF) { HStack(spacing: 6) { Image(systemName: "square.and.arrow.up"); Text(L("Export PDF…")) } }.disabled(store.busy)
+                BuildToolbarControls(store: store)
             }
         }
         .sheet(isPresented: $store.showOrganizer) { WorkspaceOrganizer(store: store) }
@@ -912,7 +936,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(store.selected?.title ?? L("Select a file")).font(.headline)
+                    Text(store.selected?.title ?? L("Select a file")).font(.headline).lineLimit(1).truncationMode(.tail).help(store.selected?.title ?? L("Select a file"))
                     Text(store.selected?.hint ?? L("Open a section from the list on the left.")).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 8)
@@ -962,7 +986,7 @@ struct ContentView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L("PDF preview")).font(.headline)
-                    Text(L("Select text ↔ reveal in source or PDF")).font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(L("Select text ↔ reveal in source or PDF")).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(L("Select text ↔ reveal in source or PDF"))
                 }
                 Spacer()
                 Button { zoomDirection = -1; zoomEvent += 1 } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom out PDF"))
