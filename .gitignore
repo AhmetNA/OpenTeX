@@ -1,0 +1,13 @@
+.DS_Store
+dist/
+.build/
+*.dSYM/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.p12
+*.pfx
+*.key
+examples/starter/report/build/
+examples/starter/output/
