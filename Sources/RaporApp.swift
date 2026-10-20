@@ -51,6 +51,7 @@ final class ReportStore: ObservableObject {
     @Published var activeMatchID: String?
     @Published var jumpRange: NSRange?
     @Published var jumpRevision = 0
+    private let preferences: UserDefaults
     private var searchWork: DispatchWorkItem?
     private var lastSearchSignature = ""
     private var diskText = ""
@@ -65,12 +66,16 @@ final class ReportStore: ObservableObject {
     var fileURL: URL? { selected.map { root.appendingPathComponent("report/" + $0.path) } }
     var groups: [WorkspaceGroup] { workspace.groups }
 
-    init() {
-        let args = CommandLine.arguments
+    init(arguments: [String] = CommandLine.arguments, preferences: UserDefaults = .standard) {
+        self.preferences = preferences
+        let args = arguments
         let requested = args.firstIndex(of: "--project").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         let fallback = Bundle.main.object(forInfoDictionaryKey: "DefaultProjectPath") as? String ?? FileManager.default.currentDirectoryPath
-        root = URL(fileURLWithPath: requested ?? UserDefaults.standard.string(forKey: "reportProject") ?? fallback).resolvingSymlinksInPath()
+        root = URL(fileURLWithPath: requested ?? preferences.string(forKey: "reportProject") ?? fallback).resolvingSymlinksInPath()
         scan()
+        // Explicit --project launches must become the next normal launch's project too.
+        // Failed opens never replace the last valid project.
+        if Self.isReportProject(root), !files.isEmpty { preferences.set(root.path, forKey: "reportProject") }
         let requestedFile = args.firstIndex(of: "--file").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         if let requestedFile, let file = files.first(where: { $0.path == requestedFile }) { select(file) }
         else if let first = files.first { select(first) }
@@ -423,19 +428,24 @@ final class ReportStore: ObservableObject {
         }
     }
 
+    private static func isReportProject(_ url: URL) -> Bool {
+        ["report/rapor.tex", "scripts/build_report.py"].allSatisfy { path in
+            (try? url.appendingPathComponent(path).resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }
+    }
+
     func chooseProject() {
         guard !busy, save() else { return }
         let panel = NSOpenPanel()
         panel.title = L("Select a report project folder")
         panel.canChooseFiles = false; panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        guard FileManager.default.fileExists(atPath: url.appendingPathComponent("report/rapor.tex").path),
-              FileManager.default.fileExists(atPath: url.appendingPathComponent("scripts/build_report.py").path) else {
+        guard Self.isReportProject(url) else {
             error = L("This folder does not contain report/rapor.tex and scripts/build_report.py."); return
         }
         clearPDFReveal()
         root = url.resolvingSymlinksInPath()
-        UserDefaults.standard.set(root.path, forKey: "reportProject")
+        preferences.set(root.path, forKey: "reportProject")
         selected = nil; text = ""; diskText = ""; dirty = false; conflict = false
         scan()
         if let first = files.first { select(first) }

@@ -44,7 +44,7 @@ OPENTEX_ALLOW_ADHOC=1 ./build.sh
 
 Ad-hoc builds may ask for file access again after updates. Builds are not notarized or App Store distributions. No signing certificates or private keys are included.
 
-The app initially opens `examples/starter`. To use your own project, choose **Open Project** (**Proje Aç** in Turkish) or launch with:
+The app reopens the last successfully opened project, including projects opened with `--project`. On its first launch it opens `examples/starter`. To use your own project, choose **Open Project** (**Proje Aç** in Turkish) or launch with:
 
 ```sh
 open -n dist/OpenTeX.app --args --project /path/to/project --file kaynaklar.bib

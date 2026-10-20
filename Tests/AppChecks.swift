@@ -246,6 +246,23 @@ import PDFKit
         try savedLayout.write(to: store.workspaceURL)
         store.scan()
         assert(store.saveWorkspace(layout, original: savedLayout, expectedRoot: URL(fileURLWithPath: "/other")) != nil)
+        // Persist successful explicit launches, restore on a plain launch, and retain the prior project after a failed open.
+        let suiteName = "com.opentex.project-restore-checks." + UUID().uuidString
+        let preferences = UserDefaults(suiteName: suiteName)!
+        defer { preferences.removePersistentDomain(forName: suiteName) }
+        try FileManager.default.createDirectory(at: store.root.appendingPathComponent("scripts"), withIntermediateDirectories: true)
+        try "% test entry point".write(to: store.root.appendingPathComponent("report/rapor.tex"), atomically: true, encoding: .utf8)
+        try "# test build script".write(to: store.root.appendingPathComponent("scripts/build_report.py"), atomically: true, encoding: .utf8)
+        let explicit = ReportStore(arguments: ["OpenTeX", "--project", store.root.path], preferences: preferences)
+        assert(preferences.string(forKey: "reportProject") == store.root.path)
+        let restored = ReportStore(arguments: ["OpenTeX"], preferences: preferences)
+        assert(restored.root == explicit.root && !restored.files.isEmpty)
+        let failed = ReportStore(arguments: ["OpenTeX", "--project", store.root.appendingPathComponent("missing").path], preferences: preferences)
+        assert(failed.files.isEmpty)
+        assert(preferences.string(forKey: "reportProject") == store.root.path)
+        let restoredAfterFailure = ReportStore(arguments: ["OpenTeX"], preferences: preferences)
+        assert(restoredAfterFailure.root == store.root)
+        print("PASS: last-project restore after an explicit launch and invalid-project protection using isolated preferences.")
         print("PASS: project-local groups and labels persist; live discovery, protected files, source drafts, selection, malformed config and concurrent changes are safe.")
         print("PASS: one native click, blank row hit area, inactive-window first-click acceptance, synchronous file switch/save, sidebar toggle, grouped content search, range navigation, typo match, PDFKit selection notification and source navigation, editor selection, conflict protection.")
     }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.2
+
+- Remember successful `--project` launches as well as projects selected in Open Project, so a normal app launch reopens the last project.
+- Keep the previously remembered project if an explicit project cannot be opened.
+
 ## 1.7.1
 
 - Show compact icons for auto compile, compile PDF and PDF export, with translated hover descriptions and keyboard hints.
