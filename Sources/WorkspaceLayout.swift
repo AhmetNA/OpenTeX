@@ -24,13 +24,19 @@ struct WorkspaceLayout: Codable, Equatable {
         if ["cover.tex", "preamble.tex"].contains(path) {
             return WorkspaceGroup(id: "auto:template", name: "Protected template", localizeName: true)
         }
-        if ["png", "jpg", "jpeg", "webp"].contains(ext) {
+        if ReportFileTypes.imageExtensions.contains(ext) || ext == "pdf" {
             return WorkspaceGroup(id: "auto:images", name: "Images", localizeName: true)
+        }
+        if ReportFileTypes.tableExtensions.contains(ext) {
+            return WorkspaceGroup(id: "auto:tables", name: "Tables", localizeName: true)
         }
         if ext == "bib" {
             return WorkspaceGroup(id: "auto:references", name: "References", localizeName: true)
         }
         let folder = (path as NSString).deletingLastPathComponent
+        if folder == "attachments" {
+            return WorkspaceGroup(id: "auto:attachments", name: "Attachments", localizeName: true)
+        }
         if !folder.isEmpty {
             return WorkspaceGroup(id: "folder:" + folder, name: folder == "sections" ? "Report text" : readableName(folder), localizeName: folder == "sections")
         }
@@ -47,7 +53,7 @@ struct WorkspaceLayout: Codable, Equatable {
         // Folder text first, then document, references, templates and images. Folder names remain dynamic.
         func rank(_ id: String) -> Int {
             if id.hasPrefix("folder:") { return 0 }
-            return ["auto:document", "auto:references", "auto:template", "auto:images"].firstIndex(of: id).map { $0 + 1 } ?? 6
+            return ["auto:document", "auto:references", "auto:tables", "auto:attachments", "auto:template", "auto:images"].firstIndex(of: id).map { $0 + 1 } ?? 6
         }
         result.groups.sort { rank($0.id) == rank($1.id) ? $0.id < $1.id : rank($0.id) < rank($1.id) }
         return result

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.8.0
+
+- Drag files from Finder onto the sidebar, or use Add Files, to copy images/PDFs, spreadsheets, text, LaTeX and BibTeX into project folders.
+- Preserve originals, existing filenames, protected templates and the current source draft; number collisions instead of overwriting.
+- Add image/table groups, searchable filenames, imported PDF/image previews, editable CSV/TSV/text and external spreadsheet opening.
+- Show drop feedback and separate import errors; include copy/import integration checks.
+
 ## 1.7.2
 
 - Remember successful `--project` launches as well as projects selected in Open Project, so a normal app launch reopens the last project.

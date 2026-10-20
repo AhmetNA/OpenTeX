@@ -246,6 +246,42 @@ import PDFKit
         try savedLayout.write(to: store.workspaceURL)
         store.scan()
         assert(store.saveWorkspace(layout, original: savedLayout, expectedRoot: URL(fileURLWithPath: "/other")) != nil)
+        // Dropping assets must preserve even a conflicting source draft and place new files in visible groups.
+        let importFolder = store.root.appendingPathComponent("incoming")
+        try FileManager.default.createDirectory(at: importFolder, withIntermediateDirectories: true)
+        let csvImport = importFolder.appendingPathComponent("scores.csv")
+        let xlsxImport = importFolder.appendingPathComponent("scores.xlsx")
+        let imageImport = importFolder.appendingPathComponent("chart.png")
+        let pdfImport = importFolder.appendingPathComponent("figure.pdf")
+        try "year,score\n2026,10".write(to: csvImport, atomically: true, encoding: .utf8)
+        try Data([0, 1, 2, 255]).write(to: xlsxImport)
+        try Data("image bytes".utf8).write(to: imageImport)
+        try (bytes as Data).write(to: pdfImport)
+        let beforeImportDraft = store.text, beforeImportSelected = store.selected?.path, beforeImportError = store.error
+        assert(store.importFiles([csvImport, xlsxImport, imageImport, pdfImport]))
+        assert(store.text == beforeImportDraft && store.selected?.path == beforeImportSelected && store.dirty && store.conflict)
+        assert(store.error == beforeImportError)
+        assert(store.groups.contains { $0.id == "auto:tables" })
+        assert(store.groups.contains { $0.id == "auto:images" })
+        assert(store.files.contains { $0.path == "tables/scores.csv" && $0.isEditableText && $0.isTable })
+        assert(store.files.contains { $0.path == "tables/scores.xlsx" && !$0.isEditableText && $0.isTable })
+        assert(store.files.contains { $0.path == "assets/figure.pdf" && $0.isPDF && !$0.isEditableText })
+        let importedImage = store.files.first { $0.path == "assets/chart.png" }!
+        assert(importedImage.isImage && !importedImage.isEditableText)
+        assert(store.lastImportedPath == "tables/scores.csv")
+        let invalidImport = importFolder.appendingPathComponent("unsupported.sh")
+        try Data("ignored".utf8).write(to: invalidImport)
+        assert(!store.importFiles([invalidImport]) && store.importError != nil && store.error == beforeImportError)
+        assert(store.importFiles([imageImport]) && store.importError == nil)
+        // Cancel the synthetic conflicting draft without touching its source, then open imported text/binary files.
+        let assetStore = ReportStore()
+        assetStore.select(assetStore.files.first { $0.path == "tables/scores.xlsx" }!)
+        assert(assetStore.selected?.isEditableText == false && assetStore.text.isEmpty && assetStore.error == nil)
+        assetStore.select(assetStore.files.first { $0.path == "tables/scores.csv" }!)
+        assert(assetStore.text.contains("year,score") && assetStore.selected?.isEditableText == true)
+        assetStore.searchQuery = "scores"; assetStore.searchNow()
+        assert(assetStore.searchResults.contains { $0.file.path == "tables/scores.xlsx" && $0.matches.isEmpty })
+        print("PASS: import integration preserves drafts/conflicts, adds image/table groups, discovers imported text/binary/PDF files and clears import errors independently.")
         // Persist successful explicit launches, restore on a plain launch, and retain the prior project after a failed open.
         let suiteName = "com.opentex.project-restore-checks." + UUID().uuidString
         let preferences = UserDefaults(suiteName: suiteName)!

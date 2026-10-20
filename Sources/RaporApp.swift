@@ -2,6 +2,7 @@ import SwiftUI
 import AppKit
 import PDFKit
 import Combine
+import UniformTypeIdentifiers
 
 struct ReportFile: Identifiable, Hashable {
     let path: String
@@ -11,7 +12,11 @@ struct ReportFile: Identifiable, Hashable {
     var id: String { path }
     var name: String { URL(fileURLWithPath: path).lastPathComponent }
     var isProtected: Bool { ["cover.tex", "preamble.tex"].contains(path) }
-    var isImage: Bool { ["png", "jpg", "jpeg", "webp"].contains(URL(fileURLWithPath: path).pathExtension.lowercased()) }
+    var extensionName: String { URL(fileURLWithPath: path).pathExtension.lowercased() }
+    var isImage: Bool { ReportFileTypes.imageExtensions.contains(extensionName) }
+    var isPDF: Bool { extensionName == "pdf" }
+    var isTable: Bool { ReportFileTypes.tableExtensions.contains(extensionName) }
+    var isEditableText: Bool { ReportFileTypes.textExtensions.contains(extensionName) }
 }
 
 struct FileSearchResult: Identifiable {
@@ -27,6 +32,9 @@ final class ReportStore: ObservableObject {
     @Published var files: [ReportFile] = []
     @Published var workspace = WorkspaceLayout()
     @Published var showOrganizer = false
+    @Published var lastImportedPath: String?
+    @Published var importError: String?
+    var hasError: Bool { error != nil || importError != nil }
     private(set) var workspaceSnapshot: Data?
     private var workspaceReadable = true
     var workspaceURL: URL { root.appendingPathComponent(".opentex/workspace.json") }
@@ -107,10 +115,15 @@ final class ReportStore: ObservableObject {
         var result: [ReportFile] = []
         if let enumerator = FileManager.default.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
             for case let url as URL in enumerator {
-                if ["template-original", "build"].contains(url.lastPathComponent) { enumerator.skipDescendants(); continue }
+                let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+                if ["template-original", "build"].contains(url.lastPathComponent) {
+                    // Calling skipDescendants on a symlink skips the next real directory on macOS.
+                    if values?.isDirectory == true && values?.isSymbolicLink != true { enumerator.skipDescendants() }
+                    continue
+                }
                 let relative = url.resolvingSymlinksInPath().pathComponents.dropFirst(folder.resolvingSymlinksInPath().pathComponents.count).joined(separator: "/")
-                if relative.hasPrefix("template-original/") || relative.hasPrefix("build/") { enumerator.skipDescendants(); continue }
-                guard ["tex", "bib", "png", "jpg", "jpeg", "webp"].contains(url.pathExtension.lowercased()),
+                guard url.resolvingSymlinksInPath().pathComponents.starts(with: folder.resolvingSymlinksInPath().pathComponents),
+                      ReportFileTypes.supportedExtensions.contains(url.pathExtension.lowercased()),
                       (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
                 let content = url.pathExtension.lowercased() == "tex" ? (relative == selected?.path ? text : ((try? String(contentsOf: url, encoding: .utf8)) ?? "")) : ""
                 let automatic = special[relative]?.0 ?? (url.pathExtension.lowercased() == "tex" ? WorkspaceLayout.sourceTitle(content, path: relative) : WorkspaceLayout.readableName(url.deletingPathExtension().lastPathComponent))
@@ -153,6 +166,59 @@ final class ReportStore: ObservableObject {
         } catch { return L("Could not save file layout: %@", error.localizedDescription) }
     }
 
+    @discardableResult
+    func importFiles(_ urls: [URL]) -> Bool {
+        guard !urls.isEmpty else { return false }
+        guard !busy else { status = L("Wait for the PDF build before adding files"); return false }
+        importError = nil
+        let original = workspaceSnapshot
+        var layout = workspace
+        let result = ReportFileImport.copy(urls, into: root)
+        guard !result.files.isEmpty else {
+            importError = result.issues.prefix(3).map { L("%@: %@", $0.filename, L($0.message)) }.joined(separator: "\n")
+            status = L("No files were added")
+            return false
+        }
+        // Import is an explicit user action: add appropriate groups, without touching the open source draft.
+        for imported in result.files where imported.copied {
+            let candidate = WorkspaceLayout.defaultGroup(for: imported.path)
+            let existing = layout.groups.first { $0.id == candidate.id ||
+                ($0.localizeName ? L($0.name) : $0.name).localizedCaseInsensitiveCompare(candidate.localizeName ? L(candidate.name) : candidate.name) == .orderedSame }
+            let groupID = existing?.id ?? candidate.id
+            if existing == nil { layout.groups.append(candidate) }
+            layout.files[imported.path] = WorkspaceFileSettings(groupID: groupID)
+        }
+        let copied = result.files.filter(\.copied).count
+        let layoutError = copied > 0 ? saveWorkspace(layout, original: original, expectedRoot: root) : nil
+        scan()
+        sidebarVisible = true
+        searchQuery = ""
+        lastImportedPath = result.files.first?.path
+        status = copied > 0 ? L("Added files: %d", copied) : L("Files are already in this project")
+        var issues = result.issues.prefix(3).map { L("%@: %@", $0.filename, L($0.message)) }
+        if result.issues.count > 3 { issues.append(L("Other files not added: %d", result.issues.count - 3)) }
+        if let layoutError { issues.append(L("Files were copied, but grouping could not be saved: %@", layoutError)) }
+        if !issues.isEmpty { importError = issues.joined(separator: "\n") }
+        return true
+    }
+
+    func chooseFilesToImport() {
+        guard !busy else { return }
+        let panel = NSOpenPanel()
+        panel.title = L("Add Files to Project")
+        panel.canChooseFiles = true; panel.canChooseDirectories = false; panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = ReportFileTypes.supportedExtensions.compactMap { UTType(filenameExtension: $0) }
+        guard panel.runModal() == .OK else { return }
+        _ = importFiles(panel.urls)
+    }
+
+    func copySelectedPath() {
+        guard let selected else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(selected.path, forType: .string)
+        status = L("Relative path copied")
+    }
+
     func toggleSidebar() { sidebarVisible.toggle() }
 
     var searchable: Bool { !ReportSearch.tokens(searchQuery).isEmpty }
@@ -170,8 +236,8 @@ final class ReportStore: ObservableObject {
     func searchNow() {
         searchWork?.cancel()
         guard searchable else { searchResults = []; searchPending = false; return }
-        searchResults = files.filter { !$0.isImage }.compactMap { file in
-            let content = file == selected ? text : ((try? String(contentsOf: root.appendingPathComponent("report/" + file.path), encoding: .utf8)) ?? "")
+        searchResults = files.compactMap { file in
+            let content = file.isEditableText ? (file == selected ? text : ((try? String(contentsOf: root.appendingPathComponent("report/" + file.path), encoding: .utf8)) ?? "")) : ""
             let matches = ReportSearch.matches(query: searchQuery, in: content)
             let titleScore = ReportSearch.score(query: searchQuery, in: file.title + " " + file.path)
             let score = max(titleScore * 1.05, matches.first?.score ?? 0)
@@ -203,7 +269,7 @@ final class ReportStore: ObservableObject {
 
     func openPDFSelection(_ selection: String, pageText: String, pageRange: NSRange, isCover: Bool = false) {
         clearPDFReveal()
-        let documents = files.filter { !$0.isImage && (isCover || !$0.isProtected) && $0.path != "rapor.tex" }.compactMap { file -> PDFSourceDocument? in
+        let documents = files.filter { $0.isEditableText && (isCover || !$0.isProtected) && $0.path != "rapor.tex" }.compactMap { file -> PDFSourceDocument? in
             let content = file == selected ? text : (try? String(contentsOf: root.appendingPathComponent("report/" + file.path), encoding: .utf8))
             return content.map { PDFSourceDocument(path: file.path, text: $0) }
         }
@@ -259,7 +325,7 @@ final class ReportStore: ObservableObject {
         saveWork?.cancel()
         let url = root.appendingPathComponent("report/" + file.path)
         do {
-            let content = file.isImage ? "" : try String(contentsOf: url, encoding: .utf8)
+            let content = !file.isEditableText ? "" : try String(contentsOf: url, encoding: .utf8)
             clearPDFReveal()
             selected = file
             text = content
@@ -290,7 +356,7 @@ final class ReportStore: ObservableObject {
     @discardableResult
     func save() -> Bool {
         saveWork?.cancel()
-        guard dirty, let url = fileURL, selected?.isImage == false else { return !conflict }
+        guard dirty, let url = fileURL, selected?.isEditableText == true else { return !conflict }
         guard selected?.isProtected != true else {
             error = L("This is a protected report template. Edit a section or the cover details file instead.")
             return false
@@ -341,7 +407,7 @@ final class ReportStore: ObservableObject {
 
     func checkExternalChanges() {
         scan()
-        if let url = fileURL, selected?.isImage == false,
+        if let url = fileURL, selected?.isEditableText == true,
            let current = try? String(contentsOf: url, encoding: .utf8), current != diskText {
             if dirty { conflict = true; error = L("The file changed elsewhere. Choose a version before saving.") }
             else { clearPDFReveal(); text = current; diskText = current; status = L("External changes loaded"); if searchable { scheduleSearch() } }
@@ -358,7 +424,7 @@ final class ReportStore: ObservableObject {
     }
 
     func signature() -> String {
-        files.filter { !$0.isImage }.map {
+        files.filter { $0.isEditableText }.map {
             (try? String(contentsOf: root.appendingPathComponent("report/" + $0.path), encoding: .utf8)) ?? ""
         }.joined(separator: "\u{0}")
     }
@@ -444,6 +510,7 @@ final class ReportStore: ObservableObject {
             error = L("This folder does not contain report/rapor.tex and scripts/build_report.py."); return
         }
         clearPDFReveal()
+        importError = nil; lastImportedPath = nil
         root = url.resolvingSymlinksInPath()
         preferences.set(root.path, forKey: "reportProject")
         selected = nil; text = ""; diskText = ""; dirty = false; conflict = false
@@ -579,7 +646,7 @@ struct CodeEditor: NSViewRepresentable {
         }
         func highlight(fontSize: CGFloat) {
             guard let editor, let storage = editor.textStorage else { return }
-            let syntax = store.selected?.path.hasSuffix(".bib") == true ? "bib" : "tex"
+            let syntax = store.selected?.extensionName == "bib" ? "bib" : store.selected?.extensionName == "tex" ? "tex" : "plain"
             guard styledText != editor.string || styledSize != fontSize || styledSyntax != syntax else { return }
             styledText = editor.string; styledSize = fontSize; styledSyntax = syntax
             let range = NSRange(location: 0, length: storage.length)
@@ -589,7 +656,7 @@ struct CodeEditor: NSViewRepresentable {
             storage.setAttributes([.foregroundColor: NSColor.labelColor,
                                    .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
                                    .paragraphStyle: paragraph], range: range)
-            for (pattern, color) in [(#"\\[a-zA-Z@]+|[{}]"#, NSColor.systemBlue), (#"(?m)(?<!\\)%.*$"#, NSColor.secondaryLabelColor)] {
+            for (pattern, color) in (syntax == "tex" ? [(#"\\[a-zA-Z@]+|[{}]"#, NSColor.systemBlue), (#"(?m)(?<!\\)%.*$"#, NSColor.secondaryLabelColor)] : []) {
                 if let regex = try? NSRegularExpression(pattern: pattern) {
                     for match in regex.matches(in: editor.string, range: range) {
                         storage.addAttribute(.foregroundColor, value: color, range: match.range)
@@ -828,6 +895,7 @@ struct ContentView: View {
     @EnvironmentObject var store: ReportStore
     @State private var zoomEvent = 0
     @State private var zoomDirection = 0
+    @State private var sidebarDropTargeted = false
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
@@ -838,7 +906,7 @@ struct ContentView: View {
             Divider()
             HStack(spacing: 8) {
                 if store.busy { ProgressView().controlSize(.small) }
-                else { Image(systemName: store.error == nil ? "checkmark.circle" : "exclamationmark.triangle").foregroundStyle(store.error == nil ? Color.secondary : Color.orange) }
+                else { Image(systemName: store.hasError ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(store.hasError ? Color.orange : Color.secondary) }
                 Text(store.status).font(.system(size: 12)).lineLimit(1).truncationMode(.tail).help(store.status)
                 Spacer()
                 Text(L("OpenTeX · %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development"))).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
@@ -876,10 +944,12 @@ struct ContentView: View {
                 HStack {
                     Text("OpenTeX").font(.headline)
                     Spacer()
+                    Button(action: store.chooseFilesToImport) { Image(systemName: "plus") }
+                        .buttonStyle(.borderless).help(L("Add Files…")).accessibilityLabel(L("Add Files…")).disabled(store.busy)
                     Button { store.showOrganizer = true } label: { Image(systemName: "slider.horizontal.3") }
                         .buttonStyle(.borderless).help(L("Organize Files"))
                 }
-                Text(L("Select a section to start writing.")).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(L("Drop files here, or select a section.")).font(.system(size: 12)).foregroundStyle(.secondary)
             }.padding(16)
             HStack(spacing: 4) {
                 TextField(L("Search files or content"), text: $store.searchQuery).textFieldStyle(.roundedBorder)
@@ -923,7 +993,7 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(group.localizeName ? L(group.name) : group.name).font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 12).padding(.bottom, 5)
                                     ForEach(items) { file in
-                                        FileRow(title: file.title, subtitle: file.name, icon: file.isImage ? "photo" : file.path == "rapor.tex" ? "slider.horizontal.3" : file.path.hasSuffix(".bib") ? "books.vertical" : "doc.text", selected: store.selected == file, help: file.hint) { store.select(file) }.frame(height: 51).id(file.id)
+                                        FileRow(title: file.title, subtitle: file.name, icon: file.isImage ? "photo" : file.isTable ? "tablecells" : file.isPDF ? "doc.richtext" : file.path == "rapor.tex" ? "slider.horizontal.3" : file.path.hasSuffix(".bib") ? "books.vertical" : "doc.text", selected: store.selected == file, help: file.hint) { store.select(file) }.frame(height: 51).id(file.id)
                                     }
                                 }
                             }
@@ -935,12 +1005,36 @@ struct ContentView: View {
                 if let path { proxy.scrollTo(path, anchor: .center) }
             }
             .onAppear { if let path = store.selected?.id { proxy.scrollTo(path, anchor: .center) } }
+            .onChange(of: store.lastImportedPath) { _, path in
+                if let path { proxy.scrollTo(path, anchor: .center) }
+            }
             }
             Spacer(minLength: 0)
             Divider()
+            if let error = store.importError {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(error).font(.system(size: 11)).lineLimit(4).help(error)
+                    Spacer(minLength: 0)
+                    Button { store.importError = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.borderless).help(L("Close"))
+                }.padding(12).background(Color.orange.opacity(0.1))
+            }
             Button { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: store.root.appendingPathComponent("report").path) } label: { Label(L("Show in Finder"), systemImage: "folder") }
                 .buttonStyle(.borderless).padding(14)
         }.background(Color(nsColor: .controlBackgroundColor))
+        .contentShape(Rectangle())
+        .dropDestination(for: URL.self) { urls, _ in store.importFiles(urls) } isTargeted: { sidebarDropTargeted = $0 }
+        .overlay {
+            if sidebarDropTargeted && !store.busy {
+                RoundedRectangle(cornerRadius: 8).stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2, dash: [6, 4])).padding(4).allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if sidebarDropTargeted && !store.busy {
+                Label(L("Drop files to add to this project"), systemImage: "plus.circle.fill")
+                    .font(.callout).padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8)).padding(12).allowsHitTesting(false)
+            }
+        }
     }
     var editorPane: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -978,16 +1072,27 @@ struct ContentView: View {
             }
             if store.selected?.isImage == true, let url = store.fileURL, let image = NSImage(contentsOf: url) {
                 Spacer(); Image(nsImage: image).resizable().scaledToFit().padding(30); Spacer()
+            } else if store.selected?.isPDF == true, let url = store.fileURL {
+                ImportedPDFPreview(url: url)
+            } else if let file = store.selected, !file.isEditableText {
+                ImportedFilePreview(file: file)
             } else if store.selected?.path.hasSuffix(".bib") == true {
                 BibliographyEditor(store: store).id(store.selected?.path)
-            } else if store.selected != nil {
+            } else if store.selected?.isEditableText == true {
                 CodeEditor(store: store)
             } else { Spacer() }
+            if let file = store.selected, !file.isEditableText, let url = store.fileURL {
+                HStack {
+                    Button(L("Copy Relative Path"), action: store.copySelectedPath)
+                    Spacer()
+                    Button(L("Open in Default App")) { NSWorkspace.shared.open(url) }
+                }.controlSize(.small).padding(12)
+            }
             Divider()
             HStack {
                 Text(store.selected?.path ?? "").lineLimit(1).truncationMode(.middle)
                 Spacer()
-                if store.selected?.isImage != true { Text(L("Lines: %d · UTF-8", store.text.components(separatedBy: .newlines).count)) }
+                if store.selected?.isEditableText == true { Text(L("Lines: %d · UTF-8", store.text.components(separatedBy: .newlines).count)) }
             }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 14).frame(height: 26)
         }.background(Color(nsColor: .textBackgroundColor))
     }
@@ -1051,7 +1156,10 @@ struct OpenTeXApp: App {
         }
         .defaultSize(width: 1360, height: 850)
         .commands {
-            CommandGroup(replacing: .newItem) { Button(L("Open Project…"), action: store.chooseProject).keyboardShortcut("o").disabled(store.busy) }
+            CommandGroup(replacing: .newItem) {
+                Button(L("Open Project…"), action: store.chooseProject).keyboardShortcut("o").disabled(store.busy)
+                Button(L("Add Files…"), action: store.chooseFilesToImport).keyboardShortcut("i", modifiers: [.command, .shift]).disabled(store.busy)
+            }
             CommandGroup(replacing: .saveItem) {
                 Button(L("Save")) { _ = store.save() }.keyboardShortcut("s")
                 Button(L("Export PDF…"), action: store.exportPDF).keyboardShortcut("e", modifiers: [.command, .shift]).disabled(store.busy)

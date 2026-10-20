@@ -6,6 +6,7 @@ Previously named **Rapor**. Repository: [AhmetNA/OpenTeX](https://github.com/Ahm
 
 ## Features
 
+- Drag files from Finder onto the left sidebar, or use **+ / File → Add Files…**. Import multiple images, PDFs, table files and LaTeX/BibTeX sources without overwriting existing files.
 - Edit the original `.tex` and `.bib` files, with syntax highlighting, autosave and undo.
 - Compile locally and keep the previous successful PDF when compilation fails.
 - Distinguish BibTeX record types, keys, field names, titles, dates and links with semantic syntax colours and font weights.
@@ -69,6 +70,12 @@ project/
 
 Files are local. There is no application account, hosted compiler, telemetry or built-in AI service. Tectonic may download TeX packages on its first compilation. DOI/source links open in your default browser only when clicked.
 
+## Add images, tables and other files
+
+Drop individual files onto the sidebar, or use **+** / **File → Add Files…** (Command-Shift-I). Images and PDFs are copied to `report/assets`, CSV/TSV/Excel/ODS files to `report/tables`, `.tex` sources to `report/sections`, `.bib` files to `report/references`, and text attachments to `report/attachments`. The originals are kept. Name collisions create a numbered copy, and dropping a file already in the working project does not duplicate it. Folders are not imported.
+
+Imported files appear in appropriate groups without switching away from or discarding your current draft. Images/PDFs can be previewed; UTF-8 CSV/TSV/text can be edited; spreadsheets can be opened in their default app. Use **Copy Relative Path** on an asset to reference it from LaTeX. Importing a file does not insert a figure/table, convert a spreadsheet to LaTeX, or change the report's section order. The TeX engine's supported image formats still apply.
+
 ## Organize your project
 
 Click the sliders button beside **OpenTeX** in the sidebar, or choose **View → Organize Files…**. Add, rename, reorder or remove groups; use each file’s group picker to assign it. Leave a display name empty to use the first `\chapter` / `\section` heading, or the filename if no heading is available. Removing a group keeps its files under **Ungrouped**. **Use Automatic Groups** restores groups inferred from folders and file types; **Cancel** discards changes in the dialog.
@@ -95,7 +102,7 @@ The layout is stored in `.opentex/workspace.json` in the selected project, and t
 python3 examples/starter/scripts/build_report.py
 ```
 
-Checks cover system-language selection, both translation catalogs and English fallback, editable project layouts and live file discovery, source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks in both directions, selection-loop suppression and editor focus, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
+Checks cover system-language selection, both translation catalogs and English fallback, editable project layouts and live file discovery, safe multi-file import and draft preservation, source search, reverse PDF navigation, bibliography parsing and field-preserving edits, native PDFKit callbacks in both directions, selection-loop suppression and editor focus, autosave and conflicting drafts. They use temporary projects. The starter compile is an additional local integration check.
 
 ## Scope and licence
 
