@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.8.1
+
+- Make the PDF expand button a real full-screen toggle in the same window; collapse it with the same button or Esc, keeping the editor cursor, scroll position and undo history.
+- Hide the PDF header in full screen until the pointer reaches the top edge.
+- Make fit-to-width an optional toggle that stays lit while on; zooming turns it off, and full screen and rebuilds keep the chosen zoom.
+- Search the PDF or the editor with ⌘F, whichever pane is in use; the PDF gets a find bar with highlighted matches.
+- Remember the auto-compile choice across launches.
+- Show a faint, self-dismissing "Compiled" notice over the PDF after each successful build.
+- Reach text written directly in `rapor.tex` from PDF selections.
+- Match PDF and source selections across printed citation, heading and caption numbers; exact text matches still come first.
+
 ## 1.8.0
 
 - Drag files from Finder onto the sidebar, or use Add Files, to copy images/PDFs, spreadsheets, text, LaTeX and BibTeX into project folders.

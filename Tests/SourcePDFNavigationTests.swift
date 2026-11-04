@@ -35,6 +35,23 @@ import Foundation
         }
         let long = (0..<200).map { "word\($0)" }.joined(separator: " ")
         assert(locate(long, source: long, pages: [long]) != nil)
+        // A source selection spanning a citation still reaches the PDF text around the printed number.
+        let cited = "The promotion budget~\\cite{key}. Studies can also help."
+        let citedPage = "The promotion budget [1]. Studies can also help."
+        let citedHit = locate(cited, source: cited, pages: [citedPage])
+        assert(citedHit.map { (citedPage as NSString).substring(with: $0.range) } == "The promotion budget [1]. Studies can also help")
+        // PDF find bar: every occurrence, Turkish folding, wrapped and hyphenated words, no false joins.
+        let findPages = ["FİNAL raporunda güncellenecek. Final\nrapor bitti.", "not her par-\nticular word, another word"]
+        let find = PDFSourceNavigation.PDFIndex(pages: findPages)
+        func found(_ query: String) -> [String] { find.matches(query).map { (findPages[$0.pageIndex] as NSString).substring(with: $0.range) } }
+        assert(found("final") == ["FİNAL", "Final"])
+        assert(found("guncellenecek") == ["güncellenecek"])
+        assert(found("final rapor") == ["FİNAL raporunda", "Final\nrapor"])
+        assert(found("particular") == ["par-\nticular"])
+        assert(found("the") == ["another"])
+        assert(found("word") == ["word", "word"])
+        assert(found("  ").isEmpty && found("zzz").isEmpty)
+        assert(find.matches("word").map(\.pageIndex) == [1, 1])
         print("PASS: source-to-PDF mapping, original PDF ranges, source markup/comments, Unicode/ligatures/wrapping, repeated occurrences, cover priority, stale PDF, ambiguity and invalid ranges.")
     }
 }

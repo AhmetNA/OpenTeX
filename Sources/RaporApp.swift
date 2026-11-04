@@ -48,9 +48,11 @@ final class ReportStore: ObservableObject {
     @Published var log = ""
     @Published var showLog = false
     @Published var pdfRevision = 0
+    @Published var compileSuccessRevision = 0
     @Published var pdfRevealRequest: PDFSourceNavigation.RevealRequest?
     @Published var pdfRevealRevision = 0
-    @Published var autoCompile = false
+    @Published var autoCompile = false { didSet { preferences.set(autoCompile, forKey: "autoCompile") } }
+    private var suppressAutoCompile = false
     @Published var fontSize: CGFloat = 14
     @Published var sidebarVisible = true
     @Published var searchQuery = "" { didSet { scheduleSearch() } }
@@ -76,6 +78,7 @@ final class ReportStore: ObservableObject {
 
     init(arguments: [String] = CommandLine.arguments, preferences: UserDefaults = .standard) {
         self.preferences = preferences
+        autoCompile = preferences.bool(forKey: "autoCompile")
         let args = arguments
         let requested = args.firstIndex(of: "--project").flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil }
         let fallback = Bundle.main.object(forInfoDictionaryKey: "DefaultProjectPath") as? String ?? FileManager.default.currentDirectoryPath
@@ -269,7 +272,7 @@ final class ReportStore: ObservableObject {
 
     func openPDFSelection(_ selection: String, pageText: String, pageRange: NSRange, isCover: Bool = false) {
         clearPDFReveal()
-        let documents = files.filter { $0.isEditableText && (isCover || !$0.isProtected) && $0.path != "rapor.tex" }.compactMap { file -> PDFSourceDocument? in
+        let documents = files.filter { $0.isEditableText && (isCover || !$0.isProtected) }.compactMap { file -> PDFSourceDocument? in
             let content = file == selected ? text : (try? String(contentsOf: root.appendingPathComponent("report/" + file.path), encoding: .utf8))
             return content.map { PDFSourceDocument(path: file.path, text: $0) }
         }
@@ -374,7 +377,7 @@ final class ReportStore: ObservableObject {
             dirty = false
             conflict = false
             status = L("Saved")
-            if autoCompile { scheduleCompile() }
+            if autoCompile && !suppressAutoCompile { scheduleCompile() }
             return true
         } catch {
             self.error = L("Could not save: %@", error.localizedDescription)
@@ -440,10 +443,9 @@ final class ReportStore: ObservableObject {
         guard !busy else { return }
         compileWork?.cancel()
         // Saving here must not enqueue a duplicate auto-compile.
-        let automatic = autoCompile
-        autoCompile = false
+        suppressAutoCompile = true
         let saved = save()
-        autoCompile = automatic
+        suppressAutoCompile = false
         guard saved else { return }
         let script = root.appendingPathComponent("scripts/build_report.py")
         guard FileManager.default.fileExists(atPath: script.path) else {
@@ -475,6 +477,7 @@ final class ReportStore: ObservableObject {
                     self.busy = false; self.process = nil
                     if code == 0 {
                         self.refreshPDF()
+                        self.compileSuccessRevision += 1
                         self.status = self.signature() == self.compileSignature && !self.dirty ? L("PDF is up to date") : L("PDF ready · new changes pending")
                     } else {
                         self.status = L("Build failed")
@@ -672,25 +675,40 @@ struct CodeEditor: NSViewRepresentable {
     }
 }
 
+struct PDFFindResult: Equatable {
+    let position: Int
+    let total: Int
+}
+
 final class PreviewPDFView: PDFView {
     var revision = -1
     var zoomEvent = 0
     var sourcePath = ""
     var revealRevision = -1
+    var holdsFocus = false
+    weak var previousResponder: NSResponder?
+    var findEvent = 0
 }
 struct PDFPreview: NSViewRepresentable {
     let url: URL
     let revision: Int
     let zoomEvent: Int
     let zoomDirection: Int
+    var fitsWidth = true
+    var onFitsWidthChange: ((Bool) -> Void)? = nil
     let onSelection: (String, String, NSRange, Bool) -> Void
     var revealRequest: PDFSourceNavigation.RevealRequest? = nil
     var revealRevision = 0
     var onReveal: ((UUID, Bool) -> Void)? = nil
+    var holdsFocus = false
+    var findQuery = ""
+    var findEvent = 0
+    var findDirection = 1
+    var onFindResult: ((PDFFindResult?) -> Void)? = nil
     func makeCoordinator() -> Coordinator { Coordinator(onSelection) }
     func makeNSView(context: Context) -> PreviewPDFView {
         let view = PreviewPDFView()
-        view.autoScales = true; view.displayMode = .singlePageContinuous
+        view.autoScales = fitsWidth; view.displayMode = .singlePageContinuous
         view.displayDirection = .vertical; view.displaysPageBreaks = true
         view.backgroundColor = .windowBackgroundColor
         view.setAccessibilityLabel(L("Compiled report PDF preview"))
@@ -700,19 +718,39 @@ struct PDFPreview: NSViewRepresentable {
     }
     func updateNSView(_ view: PreviewPDFView, context: Context) {
         context.coordinator.onSelection = onSelection
+        context.coordinator.onFitsWidthChange = onFitsWidthChange
+        if view.autoScales != fitsWidth { view.autoScales = fitsWidth }
         if view.zoomEvent != zoomEvent {
             view.zoomEvent = zoomEvent
-            if zoomDirection > 0 { view.zoomIn(nil) }
-            else if zoomDirection < 0 { view.zoomOut(nil) }
-            else { view.autoScales = true }
+            if zoomDirection > 0 { view.zoomIn(nil) } else { view.zoomOut(nil) }
+        }
+        // The collapsed editor must not keep receiving keystrokes during full screen.
+        if view.holdsFocus != holdsFocus, let window = view.window {
+            view.holdsFocus = holdsFocus
+            if holdsFocus {
+                view.previousResponder = window.firstResponder
+                window.makeFirstResponder(view)
+            } else if let previous = view.previousResponder {
+                // The editor can only take focus again once it has been laid out at full width.
+                DispatchQueue.main.async { window.makeFirstResponder(previous) }
+            }
         }
         if view.revision != revision || view.sourcePath != url.path {
             context.coordinator.cancelPendingSelection()
             let sameSource = view.sourcePath == url.path
             let page = sameSource ? view.currentPage.flatMap { view.document?.index(for: $0) } : nil
+            // A rebuild keeps the zoom the user chose.
+            let scale = view.scaleFactor
             view.document = PDFDocument(url: url)
+            if !fitsWidth { view.scaleFactor = scale }
             view.revision = revision; view.sourcePath = url.path
             if let page, let doc = view.document, doc.pageCount > 0, let target = doc.page(at: min(page, doc.pageCount - 1)) { view.go(to: target) }
+        }
+        context.coordinator.onFindResult = onFindResult
+        context.coordinator.updateFind(query: findQuery, revision: revision)
+        if view.findEvent != findEvent {
+            view.findEvent = findEvent
+            context.coordinator.stepFind(findDirection)
         }
         if view.revealRevision != revealRevision {
             view.revealRevision = revealRevision
@@ -727,24 +765,37 @@ struct PDFPreview: NSViewRepresentable {
 
     @MainActor final class Coordinator: NSObject {
         var onSelection: (String, String, NSRange, Bool) -> Void
+        var onFitsWidthChange: ((Bool) -> Void)?
         private weak var view: PreviewPDFView?
         private var pending: DispatchWorkItem?
         private var suppressSelection = false
         private var forwardSelection: (page: PDFPage, range: NSRange)?
         private var indexedDocument: PDFDocument?
         private var index: PDFSourceNavigation.PDFIndex?
+        var onFindResult: ((PDFFindResult?) -> Void)?
+        private var findQuery = ""
+        private var findRevision = -1
+        private var findMatches: [PDFSelection] = []
+        private var findPosition = 0
         init(_ onSelection: @escaping (String, String, NSRange, Bool) -> Void) { self.onSelection = onSelection }
         func observe(_ view: PreviewPDFView) {
             stopObserving()
             self.view = view
             NotificationCenter.default.addObserver(self, selector: #selector(selectionChanged), name: .PDFViewSelectionChanged, object: view)
+            NotificationCenter.default.addObserver(self, selector: #selector(scaleChanged), name: .PDFViewScaleChanged, object: view)
+        }
+        // A pinch leaves fit-to-width, so the toolbar button must stop showing it as on.
+        @objc private func scaleChanged(_ notification: Notification) {
+            guard view?.autoScales == false else { return }
+            let callback = onFitsWidthChange
+            DispatchQueue.main.async { callback?(false) }
         }
         func cancelPendingSelection() { pending?.cancel(); pending = nil }
         func stopObserving() {
             cancelPendingSelection()
             NotificationCenter.default.removeObserver(self)
             view = nil
-            forwardSelection = nil; indexedDocument = nil; index = nil
+            forwardSelection = nil; indexedDocument = nil; index = nil; findMatches = []
         }
         deinit { NotificationCenter.default.removeObserver(self) }
         @objc private func selectionChanged(_ notification: Notification) {
@@ -773,21 +824,66 @@ struct PDFPreview: NSViewRepresentable {
         @discardableResult func reveal(_ request: PDFSourceNavigation.RevealRequest) -> Bool {
             cancelPendingSelection()
             guard let view, let document = view.document else { return false }
-            if indexedDocument !== document {
-                indexedDocument = document
-                index = PDFSourceNavigation.PDFIndex(pages: (0..<document.pageCount).map { document.page(at: $0)?.string ?? "" })
-            }
+            refreshIndex(document)
             guard let hit = index?.locate(source: request.source, range: request.range, preferredPageIndex: request.preferredPageIndex),
                   let page = document.page(at: hit.pageIndex), let selection = page.selection(for: hit.range),
                   selection.numberOfTextRanges(on: page) == 1 else { clearReveal(); return false }
+            show(selection, on: page, color: .systemYellow, in: view)
+            return true
+        }
+        private func refreshIndex(_ document: PDFDocument) {
+            guard indexedDocument !== document else { return }
+            indexedDocument = document
+            index = PDFSourceNavigation.PDFIndex(pages: (0..<document.pageCount).map { document.page(at: $0)?.string ?? "" })
+        }
+        private func show(_ selection: PDFSelection, on page: PDFPage, color: NSColor, in view: PreviewPDFView) {
             forwardSelection = (page, selection.range(at: 0, on: page))
             suppressSelection = true
             defer { suppressSelection = false }
             // PDF navigation keeps the editor's keyboard focus; the marker also blocks delayed PDFKit callbacks.
-            selection.color = .systemYellow
+            selection.color = color
             view.setCurrentSelection(selection, animate: false)
             view.go(to: selection)
-            return true
+        }
+        func updateFind(query: String, revision: Int) {
+            guard query != findQuery || (revision != findRevision && !query.isEmpty) else { return }
+            let sameQuery = query == findQuery
+            findQuery = query; findRevision = revision
+            guard let view, let document = view.document, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                let hadMatches = !findMatches.isEmpty
+                findMatches = []; view?.highlightedSelections = nil
+                if hadMatches { clearReveal() }
+                report(nil)
+                return
+            }
+            refreshIndex(document)
+            let located = (index?.matches(query) ?? []).compactMap { hit -> (Int, PDFSelection)? in
+                guard let selection = document.page(at: hit.pageIndex)?.selection(for: hit.range) else { return nil }
+                selection.color = NSColor.systemYellow.withAlphaComponent(0.45)
+                return (hit.pageIndex, selection)
+            }
+            findMatches = located.map(\.1)
+            view.highlightedSelections = findMatches
+            guard !findMatches.isEmpty else { clearReveal(); report(PDFFindResult(position: 0, total: 0)); return }
+            // A new query starts from the page in view; a rebuild stays near the current match.
+            let currentPage = view.currentPage.map { document.index(for: $0) } ?? 0
+            findPosition = sameQuery ? min(findPosition, findMatches.count - 1) : (located.firstIndex { $0.0 >= currentPage } ?? 0)
+            showFindMatch()
+        }
+        func stepFind(_ direction: Int) {
+            guard !findMatches.isEmpty else { return }
+            findPosition = (findPosition + direction + findMatches.count) % findMatches.count
+            showFindMatch()
+        }
+        private func showFindMatch() {
+            let source = findMatches[findPosition]
+            guard let view, let page = source.pages.first, let selection = source.copy() as? PDFSelection else { return }
+            show(selection, on: page, color: .systemOrange, in: view)
+            report(PDFFindResult(position: findPosition + 1, total: findMatches.count))
+        }
+        private func report(_ result: PDFFindResult?) {
+            let callback = onFindResult
+            DispatchQueue.main.async { callback?(result) }
         }
         func openSelection() {
             guard !suppressSelection, !isForwardSelection() else { return }
@@ -891,20 +987,131 @@ struct BuildToolbarControls: View {
     }
 }
 
+/// A faint confirmation over the PDF that fades by itself after each successful build.
+struct CompiledNotice: View {
+    let revision: Int
+    @State private var visible = false
+    var body: some View {
+        Text(L("Compiled")).font(.system(size: 11)).foregroundStyle(.secondary)
+            .padding(.horizontal, 10).padding(.vertical, 4)
+            .background(.regularMaterial, in: Capsule())
+            .opacity(visible ? 0.85 : 0)
+            .animation(.easeOut(duration: 0.3), value: visible)
+            .allowsHitTesting(false).accessibilityHidden(!visible)
+            .task(id: revision) {
+                guard revision > 0 else { return }
+                visible = true
+                try? await Task.sleep(for: .seconds(1.5))
+                if !Task.isCancelled { visible = false }
+            }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var store: ReportStore
     @State private var zoomEvent = 0
     @State private var zoomDirection = 0
     @State private var sidebarDropTargeted = false
+    @State private var pdfFullScreen = false
+    @State private var pdfWindow: NSWindow?
+    @State private var pdfEnteredWindowFullScreen = false
+    @State private var pdfHeaderVisible = false
+    @AppStorage("pdfFitsWidth") private var pdfFitsWidth = true
+    @State private var keyMonitor: Any?
+    @State private var pdfPaneActive = false
+    @State private var pdfFindVisible = false
+    @State private var pdfFindQuery = ""
+    @State private var pdfFindEvent = 0
+    @State private var pdfFindDirection = 1
+    @State private var pdfFindResult: PDFFindResult?
+    @FocusState private var pdfFindFocused: Bool
+    private func descendant<T: NSView>(of view: NSView?, matching match: (T) -> Bool = { _ in true }) -> T? {
+        guard let view else { return nil }
+        if let found = view as? T, match(found) { return found }
+        for child in view.subviews {
+            if let found: T = descendant(of: child, matching: match) { return found }
+        }
+        return nil
+    }
+    /// ⌘F searches the pane in use: the PDF after clicking it or in full screen, otherwise the editor.
+    private func showFind(in window: NSWindow) -> Bool {
+        let pdf: PreviewPDFView? = descendant(of: window.contentView)
+        let editor: NSTextView? = descendant(of: window.contentView) { $0.accessibilityIdentifier() == "reportEditor" }
+        let usesPDF = pdfFullScreen || pdfPaneActive || (pdf != nil && (window.firstResponder as? NSView)?.isDescendant(of: pdf!) == true)
+        if pdf != nil, usesPDF || editor == nil {
+            pdfFindVisible = true
+            DispatchQueue.main.async { pdfFindFocused = true }
+            return true
+        }
+        guard let editor else { return false }
+        window.makeFirstResponder(editor)
+        let item = NSMenuItem()
+        item.tag = NSTextFinder.Action.showFindInterface.rawValue
+        editor.performTextFinderAction(item)
+        return true
+    }
+    private func handleKeyMonitor(_ event: NSEvent) -> NSEvent? {
+        guard let window = event.window ?? NSApp.keyWindow, window.attachedSheet == nil, window.sheetParent == nil else { return event }
+        if event.type == .leftMouseDown {
+            let pdf: PreviewPDFView? = descendant(of: window.contentView)
+            pdfPaneActive = pdf.map { $0.bounds.contains($0.convert(event.locationInWindow, from: nil)) } ?? false
+            return event
+        }
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              event.charactersIgnoringModifiers?.lowercased() == "f" else { return event }
+        return showFind(in: window) ? nil : event
+    }
+    private func closePDFFind() {
+        pdfFindVisible = false; pdfFindQuery = ""; pdfFindFocused = false; pdfFindResult = nil
+    }
+    private func stepPDFFind(_ direction: Int) { pdfFindDirection = direction; pdfFindEvent += 1 }
+    private var pdfFindBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            TextField(L("Find in PDF"), text: $pdfFindQuery)
+                .textFieldStyle(.roundedBorder).focused($pdfFindFocused)
+                .onSubmit { stepPDFFind(1) }
+            if let result = pdfFindResult {
+                Text(result.total == 0 ? L("No results") : L("%d / %d", result.position, result.total))
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
+            }
+            Button { stepPDFFind(-1) } label: { Image(systemName: "chevron.up") }
+                .keyboardShortcut(.return, modifiers: .shift).help(L("Previous match · ⇧↩")).disabled((pdfFindResult?.total ?? 0) == 0)
+            Button { stepPDFFind(1) } label: { Image(systemName: "chevron.down") }
+                .help(L("Next match · ↩")).disabled((pdfFindResult?.total ?? 0) == 0)
+            Button(action: closePDFFind) { Image(systemName: "xmark") }
+                .keyboardShortcut(.cancelAction).help(L("Close"))
+        }.buttonStyle(.borderless).padding(.horizontal, 18).padding(.vertical, 7)
+    }
+    private func zoomPDF(_ direction: Int) { pdfFitsWidth = false; zoomDirection = direction; zoomEvent += 1 }
+    private func endPDFFullScreen() {
+        pdfFullScreen = false; pdfWindow = nil; pdfEnteredWindowFullScreen = false; pdfHeaderVisible = false
+    }
+    private func togglePDFFullScreen() {
+        if pdfFullScreen {
+            let window = pdfWindow, restore = pdfEnteredWindowFullScreen
+            endPDFFullScreen()
+            if restore, window?.styleMask.contains(.fullScreen) == true { window?.toggleFullScreen(nil) }
+        } else if let window = NSApp.keyWindow {
+            let enter = !window.styleMask.contains(.fullScreen)
+            pdfFullScreen = true; pdfWindow = window; pdfEnteredWindowFullScreen = enter
+            if enter { window.toggleFullScreen(nil) }
+        }
+    }
     var body: some View {
         VStack(spacing: 0) {
             HSplitView {
-                if store.sidebarVisible { sidebar.frame(minWidth: 200, idealWidth: 230, maxWidth: 320) }
-                editorPane.frame(minWidth: 320, idealWidth: 540)
+                // Both stay mounted while collapsed so the pane widths, cursor, scroll position and undo history survive.
+                if store.sidebarVisible {
+                    sidebar.frame(minWidth: pdfFullScreen ? 0 : 200, idealWidth: pdfFullScreen ? 0 : 230, maxWidth: pdfFullScreen ? 0 : 320)
+                        .clipped().allowsHitTesting(!pdfFullScreen).accessibilityHidden(pdfFullScreen)
+                }
+                editorPane.frame(minWidth: pdfFullScreen ? 0 : 320, idealWidth: pdfFullScreen ? 0 : 540, maxWidth: pdfFullScreen ? 0 : .infinity)
+                    .clipped().allowsHitTesting(!pdfFullScreen).accessibilityHidden(pdfFullScreen)
                 previewPane.frame(minWidth: 320, idealWidth: 530)
             }
-            Divider()
-            HStack(spacing: 8) {
+            if !pdfFullScreen { Divider() }
+            if !pdfFullScreen { HStack(spacing: 8) {
                 if store.busy { ProgressView().controlSize(.small) }
                 else { Image(systemName: store.hasError ? "exclamationmark.triangle" : "checkmark.circle").foregroundStyle(store.hasError ? Color.orange : Color.secondary) }
                 Text(store.status).font(.system(size: 12)).lineLimit(1).truncationMode(.tail).help(store.status)
@@ -912,10 +1119,24 @@ struct ContentView: View {
                 Text(L("OpenTeX · %@", Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? L("Development"))).font(.system(size: 11)).foregroundStyle(.secondary).fixedSize()
                 Button { store.showLog.toggle() } label: { Image(systemName: "terminal") }
                     .buttonStyle(.borderless).help(L("Build log"))
-            }.padding(.horizontal, 14).frame(height: 32)
+            }.padding(.horizontal, 14).frame(height: 32) }
         }
         .frame(minWidth: 960, minHeight: 620)
+        .onAppear {
+            if keyMonitor == nil {
+                keyMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown]) { handleKeyMonitor($0) }
+            }
+        }
+        .onDisappear {
+            if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+            keyMonitor = nil
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didExitFullScreenNotification)) { note in
+            // Leaving through the green button or ⌃⌘F also ends PDF full screen.
+            if pdfFullScreen, note.object as? NSWindow === pdfWindow { endPDFFullScreen() }
+        }
         .navigationTitle("OpenTeX")
+        .toolbar(pdfFullScreen ? .hidden : .automatic, for: .windowToolbar)
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 Button(action: store.toggleSidebar) { Label(store.sidebarVisible ? L("Hide Files") : L("Show Files"), systemImage: "sidebar.left") }
@@ -1096,23 +1317,38 @@ struct ContentView: View {
             }.font(.system(size: 10)).foregroundStyle(.secondary).padding(.horizontal, 14).frame(height: 26)
         }.background(Color(nsColor: .textBackgroundColor))
     }
-    var previewPane: some View {
-        VStack(spacing: 0) {
-            HStack {
+    var previewHeader: some View {
+        HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(L("PDF preview")).font(.headline)
                     Text(L("Select text ↔ reveal in source or PDF")).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail).help(L("Select text ↔ reveal in source or PDF"))
                 }
                 Spacer()
-                Button { zoomDirection = -1; zoomEvent += 1 } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom out PDF"))
-                Button { zoomDirection = 0; zoomEvent += 1 } label: { Image(systemName: "arrow.up.left.and.arrow.down.right") }.buttonStyle(.borderless).help(L("Fit page to window"))
-                Button { zoomDirection = 1; zoomEvent += 1 } label: { Image(systemName: "plus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom in PDF"))
+                Button { zoomPDF(-1) } label: { Image(systemName: "minus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom out PDF"))
+                Button { pdfFitsWidth.toggle() } label: {
+                    Image(systemName: "arrow.left.and.right.square")
+                        .foregroundStyle(pdfFitsWidth ? Color.white : Color.primary)
+                        .padding(3)
+                        .background(pdfFitsWidth ? Color.accentColor : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                }
+                .buttonStyle(.plain)
+                .help(pdfFitsWidth ? L("Fit width: on · click to turn off") : L("Fit width: off · click to turn on"))
+                .accessibilityAddTraits(pdfFitsWidth ? .isSelected : [])
+                Button { zoomPDF(1) } label: { Image(systemName: "plus.magnifyingglass") }.buttonStyle(.borderless).help(L("Zoom in PDF"))
+                Button(action: togglePDFFullScreen) { Image(systemName: pdfFullScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right") }
+                    .buttonStyle(.borderless).keyboardShortcut(pdfFullScreen && !pdfFindVisible ? .cancelAction : nil)
+                    .help(pdfFullScreen ? L("Exit full screen · Esc") : L("Show PDF full screen"))
                 Button { NSWorkspace.shared.open(store.pdfURL) } label: { Image(systemName: "arrow.up.right.square") }.buttonStyle(.borderless).help(L("Open in Preview"))
             }.padding(.horizontal, 18).frame(height: 66)
-            Divider()
+    }
+    var previewPane: some View {
+        VStack(spacing: 0) {
+            if !pdfFullScreen { previewHeader; Divider() }
+            if pdfFindVisible { pdfFindBar; Divider() }
             if FileManager.default.fileExists(atPath: store.pdfURL.path) {
-                PDFPreview(url: store.pdfURL, revision: store.pdfRevision, zoomEvent: zoomEvent, zoomDirection: zoomDirection, onSelection: store.openPDFSelection, revealRequest: store.pdfRevealRequest,
-                           revealRevision: store.pdfRevealRevision, onReveal: store.didRevealPDF)
+                PDFPreview(url: store.pdfURL, revision: store.pdfRevision, zoomEvent: zoomEvent, zoomDirection: zoomDirection, fitsWidth: pdfFitsWidth, onFitsWidthChange: { pdfFitsWidth = $0 }, onSelection: store.openPDFSelection, revealRequest: store.pdfRevealRequest,
+                           revealRevision: store.pdfRevealRevision, onReveal: store.didRevealPDF, holdsFocus: pdfFullScreen,
+                           findQuery: pdfFindVisible ? pdfFindQuery : "", findEvent: pdfFindEvent, findDirection: pdfFindDirection, onFindResult: { pdfFindResult = $0 })
             } else {
                 VStack(spacing: 12) {
                     Image(systemName: "doc.richtext").font(.system(size: 36)).foregroundStyle(.secondary)
@@ -1120,6 +1356,21 @@ struct ContentView: View {
                     Text(L("Edit the text, then click Compile PDF.")).font(.callout).foregroundStyle(.secondary)
                     Button(L("Compile PDF"), action: store.compile).disabled(store.busy)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .overlay { CompiledNotice(revision: store.compileSuccessRevision) }
+        .overlay(alignment: .top) {
+            if pdfFullScreen {
+                // Kept mounted while hidden so Esc still reaches the exit button; a thin strip brings it back.
+                VStack(spacing: 0) { previewHeader; Divider() }
+                    .background(.regularMaterial)
+                    .opacity(pdfHeaderVisible ? 1 : 0)
+                    .allowsHitTesting(pdfHeaderVisible)
+                    .frame(height: pdfHeaderVisible ? nil : 14, alignment: .top)
+                    .clipped()
+                    .contentShape(Rectangle())
+                    .onHover { pdfHeaderVisible = $0 }
+                    .animation(.easeInOut(duration: 0.15), value: pdfHeaderVisible)
             }
         }
     }

@@ -13,22 +13,26 @@ struct PDFSourceLocation {
 /// Text-based reverse navigation; original UTF-16 ranges always point into the editable source.
 /// Context on both sides disambiguates repeated words without guessing from the open editor.
 enum PDFSourceNavigation {
+    /// Printed by LaTeX with no counterpart in the source: citation numbers, heading numbers and caption labels.
+    private static let generatedText = [#"\[\d+(?:\s*[,–-]\s*\d+)*\]"#,
+                                        #"(?m)^[ \t]*\d+(?:\.\d+)*[ \t]+(?=\p{L})"#,
+                                        #"(?m)^[ \t]*(?:Table|Figure|Tablo|Şekil)[ \t]+\d+[ \t]*[:.][ \t]*"#]
+
     private struct NormalizedText {
         let text: NSString
         let ranges: [NSRange]
 
-        init(_ original: String, latex: Bool) {
+        init(_ original: String, latex: Bool, withoutGeneratedText: Bool = false) {
             let cleaned = NSMutableString(string: original)
-            if latex {
-                // Hide comments, non-rendered arguments and command names, preserving source offsets.
-                for pattern in [#"(?m)(?<!\\)%[^\n]*"#,
-                                #"\\\\\*?(?:\[[^\]]*\])?"#,
-                                #"\\(?:label|cite\w*|ref|eqref|pageref|bibliography|bibliographystyle|input|include|begin|end)\*?(?:\[[^\]]*\])?\{[^{}]*\}"#,
-                                #"\\[a-zA-Z@]+\*?"#] {
-                    let expression = try! NSRegularExpression(pattern: pattern)
-                    for match in expression.matches(in: cleaned as String, range: NSRange(location: 0, length: cleaned.length)).reversed() {
-                        cleaned.replaceCharacters(in: match.range, with: String(repeating: " ", count: match.range.length))
-                    }
+            // Hide comments, non-rendered arguments and command names, preserving source offsets.
+            let hidden = latex ? [#"(?m)(?<!\\)%[^\n]*"#,
+                                  #"\\\\\*?(?:\[[^\]]*\])?"#,
+                                  #"\\(?:label|cite\w*|ref|eqref|pageref|bibliography|bibliographystyle|input|include|begin|end)\*?(?:\[[^\]]*\])?\{[^{}]*\}"#,
+                                  #"\\[a-zA-Z@]+\*?"#] : withoutGeneratedText ? generatedText : []
+            for pattern in hidden {
+                let expression = try! NSRegularExpression(pattern: pattern)
+                for match in expression.matches(in: cleaned as String, range: NSRange(location: 0, length: cleaned.length)).reversed() {
+                    cleaned.replaceCharacters(in: match.range, with: String(repeating: " ", count: match.range.length))
                 }
             }
             let words = try! NSRegularExpression(pattern: #"[\p{L}\p{N}]+"#)
@@ -50,9 +54,16 @@ enum PDFSourceNavigation {
 
     static func locate(selection: String, pageText: String, pageRange: NSRange,
                        documents: [PDFSourceDocument], preferredPath: String? = nil) -> PDFSourceLocation? {
-        let query = NormalizedText(selection, latex: false).text
+        // Exact text first, so generated-looking text that really is in the source keeps its match.
+        locate(selection: selection, pageText: pageText, pageRange: pageRange, documents: documents, preferredPath: preferredPath, withoutGeneratedText: false)
+            ?? locate(selection: selection, pageText: pageText, pageRange: pageRange, documents: documents, preferredPath: preferredPath, withoutGeneratedText: true)
+    }
+
+    private static func locate(selection: String, pageText: String, pageRange: NSRange, documents: [PDFSourceDocument],
+                               preferredPath: String?, withoutGeneratedText: Bool) -> PDFSourceLocation? {
+        let query = NormalizedText(selection, latex: false, withoutGeneratedText: withoutGeneratedText).text
         guard query.length > 0 else { return nil }
-        let page = NormalizedText(pageText, latex: false)
+        let page = NormalizedText(pageText, latex: false, withoutGeneratedText: withoutGeneratedText)
         let beforeEnd = page.ranges.firstIndex { NSMaxRange($0) > pageRange.location } ?? page.ranges.count
         let afterStart = page.ranges.firstIndex { $0.location >= NSMaxRange(pageRange) } ?? page.ranges.count
         let before = page.text.substring(with: NSRange(location: max(0, beforeEnd - 120), length: min(120, beforeEnd)))
@@ -99,7 +110,13 @@ enum PDFSourceNavigation {
     /// Cached per PDF document. Selection ranges always address PDFKit's original page strings.
     struct PDFIndex {
         private let pages: [NormalizedText]
-        init(pages: [String]) { self.pages = pages.map { NormalizedText($0, latex: false) } }
+        private let pagesWithoutGeneratedText: [NormalizedText]
+        private let originals: [String]
+        init(pages: [String]) {
+            originals = pages
+            self.pages = pages.map { NormalizedText($0, latex: false) }
+            pagesWithoutGeneratedText = pages.map { NormalizedText($0, latex: false, withoutGeneratedText: true) }
+        }
 
         func locate(source text: String, range: NSRange, preferredPageIndex: Int? = nil) -> PDFPageLocation? {
             guard range.location != NSNotFound, range.location >= 0, range.length > 0,
@@ -117,6 +134,40 @@ enum PDFSourceNavigation {
             let query = source.text.substring(with: NSRange(location: start, length: end - start))
             let before = source.text.substring(with: NSRange(location: max(0, start - 120), length: min(120, start)))
             let after = source.text.substring(with: NSRange(location: end, length: min(120, source.text.length - end)))
+            return search(query, before: before, after: after, in: pages, preferredPageIndex: preferredPageIndex)
+                ?? search(query, before: before, after: after, in: pagesWithoutGeneratedText, preferredPageIndex: preferredPageIndex)
+        }
+
+        /// Every occurrence for the PDF find bar. Words wrapped across lines still match, but a
+        /// query never matches across a word gap it does not contain ("the" in "not her").
+        func matches(_ query: String) -> [PDFPageLocation] {
+            let wanted = NormalizedText(query, latex: false)
+            guard wanted.text.length > 0 else { return [] }
+            let wordCount = Set(wanted.ranges.map(\.location)).count
+            var result: [PDFPageLocation] = []
+            for (index, page) in pages.enumerated() {
+                let original = originals[index] as NSString
+                var cursor = 0
+                while cursor < page.text.length {
+                    let hit = page.text.range(of: wanted.text as String, range: NSRange(location: cursor, length: page.text.length - cursor))
+                    guard hit.location != NSNotFound else { break }
+                    cursor = hit.location + 1
+                    var words = 1
+                    for position in (hit.location + 1)..<max(hit.location + 1, NSMaxRange(hit)) where page.ranges[position] != page.ranges[position - 1] {
+                        let gapStart = NSMaxRange(page.ranges[position - 1])
+                        let gap = original.substring(with: NSRange(location: gapStart, length: page.ranges[position].location - gapStart))
+                        let hyphenated = gap.contains(where: \.isNewline) && ["-", "‐", "‑"].contains(gap.trimmingCharacters(in: .whitespacesAndNewlines))
+                        if !hyphenated { words += 1 }
+                    }
+                    guard words == wordCount else { continue }
+                    result.append(PDFPageLocation(pageIndex: index, range: page.sourceRange(hit)))
+                    cursor = NSMaxRange(hit)
+                }
+            }
+            return result
+        }
+
+        private func search(_ query: String, before: String, after: String, in pages: [NormalizedText], preferredPageIndex: Int?) -> PDFPageLocation? {
             var candidates: [(PDFPageLocation, Int)] = []
             for (index, page) in pages.enumerated() {
                 var cursor = 0

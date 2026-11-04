@@ -44,6 +44,21 @@ import Foundation
             assert(hit?.path == "metadata.tex", "Cover destination missing: \(selection)")
             assert(NSMaxRange(hit!.range) <= (cover.text as NSString).length)
         }
+        // Citation, heading and caption numbers are printed by LaTeX and absent from the source.
+        let generatedSource = PDFSourceDocument(path: "generated.tex", text: "\\section{Aim and Scope}\nThe promotion budget~\\cite{key}. Studies can also help.\n\\caption{Planned project schedule}\nItem 2026 data stays.")
+        let generatedPage = "1.1 Aim and Scope\nThe promotion budget [1]. Studies can also help.\nTable 1: Planned project schedule\nItem 2026 data stays."
+        for (selected, expected) in [("The promotion budget [1]. Studies", "The promotion budget~\\cite{key}. Studies"), ("1.1 Aim and Scope", "Aim and Scope"),
+                                     ("Table 1: Planned project", "Planned project"), ("2026 data", "2026 data")] {
+            let hit = find(selected, page: generatedPage, sources: [generatedSource])
+            assert(hit.map { (generatedSource.text as NSString).substring(with: $0.range) } == expected, "Generated text: \(selected)")
+        }
+        // The same placeholder under two headings resolves by surrounding context.
+        let placeholder = "BU BÖLÜM FİNAL RAPORUNDA GÜNCELLENECEK"
+        let frontMatter = PDFSourceDocument(path: "rapor.tex", text: "\\section*{Özet}\n\(placeholder)\n\n\\section*{Abstract}\n\(placeholder)\n")
+        let frontPage = "Özet\n\(placeholder)\nAbstract\n\(placeholder)\n" as NSString
+        let lastOnPage = frontPage.range(of: placeholder, options: .backwards)
+        let lastHit = PDFSourceNavigation.locate(selection: placeholder, pageText: frontPage as String, pageRange: lastOnPage, documents: [frontMatter])
+        assert(lastHit?.range == (frontMatter.text as NSString).range(of: placeholder, options: .backwards))
         print("PASS: PDF reverse navigation: source offsets, LaTeX markup/comments, ligatures, wrapped words, Turkish, contextual repeated words and ambiguity.")
     }
 }

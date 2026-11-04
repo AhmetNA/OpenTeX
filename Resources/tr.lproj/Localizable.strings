@@ -27,6 +27,7 @@
 "Click Compile PDF first." = "Önce PDF Derle düğmesine bas.";
 "Close" = "Kapat";
 "Compile PDF" = "PDF Derle";
+"Compiled" = "Derlendi";
 "Compiled report PDF preview" = "Derlenen rapor PDF önizlemesi";
 "Compiling PDF…" = "PDF derleniyor…";
 "Compiling…" = "Derleniyor…";
@@ -59,7 +60,10 @@
 "Experiments and comparisons" = "Deneyler ve karşılaştırmalar";
 "Export PDF…" = "PDF Kaydet…";
 "External changes loaded" = "Dışarıdaki değişiklik yüklendi";
-"Fit page to window" = "Sayfayı pencereye sığdır";
+"Fit width: on · click to turn off" = "Genişliğe sığdır: açık · kapatmak için tıkla";
+"Fit width: off · click to turn on" = "Genişliğe sığdır: kapalı · açmak için tıkla";
+"Show PDF full screen" = "PDF'i tam ekran yap";
+"Exit full screen · Esc" = "Tam ekrandan çık · Esc";
 "Fixed format · read-only" = "Sabit biçim · salt okunur";
 "Fixed typography and page layout · read-only" = "Sabit yazı tipi ve sayfa düzeni · salt okunur";
 "Hide Files" = "Dosyaları Gizle";
@@ -227,3 +231,8 @@
 "No files were added" = "Dosya eklenmedi";
 "Attachments" = "Ek dosyalar";
 "Drop files here, or select a section." = "Dosya bırak veya bir bölüm seç.";
+"Find in PDF" = "PDF'te ara";
+"No results" = "Sonuç yok";
+"%d / %d" = "%d / %d";
+"Previous match · ⇧↩" = "Önceki eşleşme · ⇧↩";
+"Next match · ↩" = "Sonraki eşleşme · ↩";

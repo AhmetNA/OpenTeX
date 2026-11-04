@@ -27,6 +27,7 @@
 "Click Compile PDF first." = "Click Compile PDF first.";
 "Close" = "Close";
 "Compile PDF" = "Compile PDF";
+"Compiled" = "Compiled";
 "Compiled report PDF preview" = "Compiled report PDF preview";
 "Compiling PDF…" = "Compiling PDF…";
 "Compiling…" = "Compiling…";
@@ -59,7 +60,10 @@
 "Experiments and comparisons" = "Experiments and comparisons";
 "Export PDF…" = "Export PDF…";
 "External changes loaded" = "External changes loaded";
-"Fit page to window" = "Fit page to window";
+"Fit width: on · click to turn off" = "Fit width: on · click to turn off";
+"Fit width: off · click to turn on" = "Fit width: off · click to turn on";
+"Show PDF full screen" = "Show PDF full screen";
+"Exit full screen · Esc" = "Exit full screen · Esc";
 "Fixed format · read-only" = "Fixed format · read-only";
 "Fixed typography and page layout · read-only" = "Fixed typography and page layout · read-only";
 "Hide Files" = "Hide Files";
@@ -227,3 +231,8 @@
 "No files were added" = "No files were added";
 "Attachments" = "Attachments";
 "Drop files here, or select a section." = "Drop files here, or select a section.";
+"Find in PDF" = "Find in PDF";
+"No results" = "No results";
+"%d / %d" = "%d / %d";
+"Previous match · ⇧↩" = "Previous match · ⇧↩";
+"Next match · ↩" = "Next match · ↩";

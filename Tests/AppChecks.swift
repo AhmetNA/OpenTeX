@@ -298,6 +298,38 @@ import PDFKit
         assert(preferences.string(forKey: "reportProject") == store.root.path)
         let restoredAfterFailure = ReportStore(arguments: ["OpenTeX"], preferences: preferences)
         assert(restoredAfterFailure.root == store.root)
+        // Text written directly in the main file is reachable from the PDF.
+        let placeholder = "BU BÖLÜM FİNAL RAPORUNDA GÜNCELLENECEK"
+        let frontMatter = "\\section*{Özet}\n\(placeholder)\n\n\\section*{Abstract}\n\(placeholder)\n"
+        try frontMatter.write(to: store.root.appendingPathComponent("report/rapor.tex"), atomically: true, encoding: .utf8)
+        let mainFileStore = ReportStore(arguments: ["OpenTeX", "--project", store.root.path], preferences: preferences)
+        let frontPage = "Özet\n\(placeholder)\nAbstract\n\(placeholder)\n"
+        mainFileStore.openPDFSelection(placeholder, pageText: frontPage, pageRange: (frontPage as NSString).range(of: placeholder, options: .backwards))
+        assert(mainFileStore.selected?.path == "rapor.tex")
+        assert(mainFileStore.jumpRange == (frontMatter as NSString).range(of: placeholder, options: .backwards))
+        // The auto-compile choice survives restarts, and a build does not disturb it.
+        assert(!mainFileStore.autoCompile)
+        mainFileStore.autoCompile = true
+        assert(ReportStore(arguments: ["OpenTeX"], preferences: preferences).autoCompile)
+        mainFileStore.autoCompile = false
+        assert(!ReportStore(arguments: ["OpenTeX"], preferences: preferences).autoCompile)
+        // Only a successful build triggers the "Compiled" notice.
+        func build(_ script: String) throws {
+            try script.write(to: store.root.appendingPathComponent("scripts/build_report.py"), atomically: true, encoding: .utf8)
+            mainFileStore.compile()
+            let deadline = Date(timeIntervalSinceNow: 20)
+            while mainFileStore.busy && Date() < deadline { RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05)) }
+            assert(!mainFileStore.busy)
+        }
+        try build("# test build script")
+        assert(mainFileStore.compileSuccessRevision == 1)
+        try build("raise SystemExit(1)")
+        assert(mainFileStore.compileSuccessRevision == 1 && mainFileStore.showLog)
+        mainFileStore.autoCompile = true
+        try build("# test build script")
+        assert(mainFileStore.autoCompile && preferences.bool(forKey: "autoCompile"))
+        mainFileStore.autoCompile = false
+        try "% test entry point".write(to: store.root.appendingPathComponent("report/rapor.tex"), atomically: true, encoding: .utf8)
         print("PASS: last-project restore after an explicit launch and invalid-project protection using isolated preferences.")
         print("PASS: project-local groups and labels persist; live discovery, protected files, source drafts, selection, malformed config and concurrent changes are safe.")
         print("PASS: one native click, blank row hit area, inactive-window first-click acceptance, synchronous file switch/save, sidebar toggle, grouped content search, range navigation, typo match, PDFKit selection notification and source navigation, editor selection, conflict protection.")
